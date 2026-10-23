@@ -1,0 +1,271 @@
+{
+  "student": {
+    "name": "Saad Naeem",
+    "roll_no": "24K-3074",
+    "urdu_names": [
+      "سعد نعیم",
+      "ساد نعیم",
+      "سعد نائم",
+      "ساد نائم",
+      "سعد",
+      "ساد",
+      "saad naeem",
+      "saad naim",
+      "saad"
+    ]
+  },
+  "global_settings": {
+    "join_delay_minutes": 2,
+    "leave_tolerance_minutes": 5,
+    "reconnect_attempts": 3,
+    "reconnect_delay_seconds": 30,
+    "browser_profile": "profiles/bot_profile",
+    "screenshot_on_error": true,
+    "min_participants": 2
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "",
+    "chat_id": ""
+  },
+  "google_account": {
+    "email": "",
+    "password": ""
+  },
+  "classes": [
+    {
+      "day": "Monday",
+      "time": "08:00",
+      "duration": 160,
+      "subject": "DBS Lab",
+      "platform": "meet",
+      "link": "",
+      "id": "dcc10575"
+    },
+    {
+      "day": "Monday",
+      "time": "11:40",
+      "duration": 50,
+      "subject": "PST",
+      "platform": "meet",
+      "link": "",
+      "id": "248f6181"
+    },
+    {
+      "day": "Monday",
+      "time": "12:35",
+      "duration": 50,
+      "subject": "SDA",
+      "platform": "meet",
+      "link": "",
+      "id": "c156f992"
+    },
+    {
+      "day": "Monday",
+      "time": "13:30",
+      "duration": 50,
+      "subject": "PROB",
+      "platform": "zoom",
+      "link": "",
+      "id": "332293fa"
+    },
+    {
+      "day": "Tuesday",
+      "time": "08:00",
+      "duration": 50,
+      "subject": "PST",
+      "platform": "meet",
+      "link": "",
+      "id": "38aa9a6b"
+    },
+    {
+      "day": "Tuesday",
+      "time": "08:55",
+      "duration": 50,
+      "subject": "PROB",
+      "platform": "zoom",
+      "link": "",
+      "id": "37d4289f"
+    },
+    {
+      "day": "Tuesday",
+      "time": "10:45",
+      "duration": 50,
+      "subject": "OS",
+      "platform": "meet",
+      "link": "",
+      "id": "69644780"
+    },
+    {
+      "day": "Tuesday",
+      "time": "11:40",
+      "duration": 50,
+      "subject": "SDA",
+      "platform": "meet",
+      "link": "",
+      "id": "e47bb7aa"
+    },
+    {
+      "day": "Tuesday",
+      "time": "13:30",
+      "duration": 160,
+      "subject": "OS Lab",
+      "platform": "meet",
+      "link": "",
+      "id": "412cc722"
+    },
+    {
+      "day": "Wednesday",
+      "time": "08:00",
+      "duration": 50,
+      "subject": "DBS",
+      "platform": "meet",
+      "link": "",
+      "id": "451aa8c1"
+    },
+    {
+      "day": "Wednesday",
+      "time": "08:55",
+      "duration": 50,
+      "subject": "OS",
+      "platform": "meet",
+      "link": "",
+      "id": "3aa5de9f"
+    },
+    {
+      "day": "Wednesday",
+      "time": "09:50",
+      "duration": 50,
+      "subject": "PROB",
+      "platform": "zoom",
+      "link": "",
+      "id": "04ea33af"
+    },
+    {
+      "day": "Wednesday",
+      "time": "10:45",
+      "duration": 50,
+      "subject": "AI",
+      "platform": "meet",
+      "link": "",
+      "id": "94d5fd30"
+    },
+    {
+      "day": "Wednesday",
+      "time": "11:40",
+      "duration": 50,
+      "subject": "DBS",
+      "platform": "meet",
+      "link": "",
+      "id": "f0ff2494"
+    },
+    {
+      "day": "Wednesday",
+      "time": "13:30",
+      "duration": 160,
+      "subject": "AI Lab",
+      "platform": "meet",
+      "link": "",
+      "id": "0b656bd8"
+    },
+    {
+      "day": "Friday",
+      "time": "08:00",
+      "duration": 50,
+      "subject": "AI",
+      "platform": "meet",
+      "link": "",
+      "id": "07f0e8d3"
+    },
+    {
+      "day": "Friday",
+      "time": "08:55",
+      "duration": 50,
+      "subject": "SDA",
+      "platform": "meet",
+      "link": "",
+      "id": "4e235918"
+    },
+    {
+      "day": "Friday",
+      "time": "09:50",
+      "duration": 50,
+      "subject": "OS",
+      "platform": "meet",
+      "link": "",
+      "id": "b3830ceb"
+    },
+    {
+      "day": "Friday",
+      "time": "11:40",
+      "duration": 50,
+      "subject": "DBS",
+      "platform": "meet",
+      "link": "",
+      "id": "cffd384c"
+    },
+    {
+      "day": "Friday",
+      "time": "13:30",
+      "duration": 50,
+      "subject": "AI",
+      "platform": "meet",
+      "link": "",
+      "id": "1d6eca25"
+    },
+    {
+      "day": "Thursday",
+      "time": "19:00",
+      "duration": 60,
+      "subject": "Meeting",
+      "platform": "meet",
+      "link": "https://meet.google.com/psz-bxzd-ibu",
+      "id": "d2b51fa4"
+    },
+    {
+      "day": "Saturday",
+      "time": "22:00",
+      "duration": 60,
+      "subject": "TEST",
+      "platform": "meet",
+      "link": "https://meet.google.com/opx-zoes-cnm",
+      "_test": true,
+      "id": "c13bb82c"
+    },
+    {
+      "day": "Thursday",
+      "time": "22:28",
+      "duration": 5,
+      "subject": "Gemini 3.8",
+      "platform": "meet",
+      "link": "https://meet.google.com/tuq-ohcj-uxq",
+      "id": "e804f6b6",
+      "once": true
+    }
+  ],
+  "features": {
+    "notes": true,
+    "ai_summary": true,
+    "called_alert": true,
+    "slides": true,
+    "slide_mode": "auto",
+    "slide_interval": 4,
+    "keyframe_interval": 30,
+    "caption_language": "english",
+    "notes_language": "English",
+    "pdf_detail": "detailed",
+    "pdf_include_transcript": false,
+    "pdf_paper_size": "A4"
+  },
+  "ai": {
+    "provider": "gemini",
+    "keys": {},
+    "models": {
+      "gemini": "gemini-3.1-flash-lite"
+    }
+  },
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 5000
+  }
+}

@@ -41,7 +41,8 @@ echo.
 echo [5/7] Installing audio + speech packages...
 pip install numpy==1.26.4
 pip install SpeechRecognition==3.10.4
-pip install sounddevice==0.4.6 soundfile==0.12.1
+pip install soundfile==0.12.1 "soundcard>=0.4.2,<0.6"
+pip install "faster-whisper>=1.0.3,<2.0"
 pip install pyaudio
 if errorlevel 1 (
     echo     pyaudio failed - trying pipwin...

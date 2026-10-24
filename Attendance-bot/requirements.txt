@@ -16,12 +16,10 @@ tzdata
 # Speech recognition
 SpeechRecognition==3.10.4
 # pyaudio — installed via pipwin in setup.bat (Windows binary)
-sounddevice==0.4.6
 soundfile==0.12.1
 numpy==1.26.4
-
-# Whisper (GPU speech fallback) — needs setuptools>=65 first
-# openai-whisper==20231117  ← installed after setuptools upgrade
+faster-whisper>=1.0.3,<2.0
+soundcard>=0.4.2,<0.6
 
 # HTTP / WebSocket
 requests==2.32.2
@@ -42,5 +40,4 @@ rich==13.7.1
 psutil==5.9.8
 Pillow==10.3.0
 
-# PyTorch + CUDA — installed separately in setup.bat via:
-# pip install torch --index-url https://download.pytorch.org/whl/cu121
+# faster-whisper runs locally on CPU (int8); it does not require PyTorch or CUDA.

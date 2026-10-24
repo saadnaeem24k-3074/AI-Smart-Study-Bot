@@ -137,7 +137,7 @@ PAGE = r"""<!DOCTYPE html>
 
 <!-- ───────── NOTES ───────── -->
 <section class="tab" id="tab-notes">
-  <div class="card"><h2>Class notes</h2><div class="hint" style="margin:-.4rem 0 .6rem">Saved after every Meet class: organized AI study notes, when available, plus the original transcript.</div><div id="notesList"></div></div>
+  <div class="card"><h2>Class notes</h2><div class="hint" style="margin:-.4rem 0 .6rem">Saved after every Meet class: organized AI study notes, when available, plus the original transcript. Open a class to view its PDF beside a lecture-grounded study chat.</div><div id="notesList"></div></div>
 </section>
 
 <!-- ───────── SETTINGS ───────── -->
@@ -163,6 +163,8 @@ PAGE = r"""<!DOCTYPE html>
     <label class="check"><input type="checkbox" id="fAI"> Generate organized AI study notes at class end (needs API key below)</label>
     <label class="check"><input type="checkbox" id="fCalled"> Sound + popup when my name / roll number is called</label>
     <label class="check"><input type="checkbox" id="fSlides"> Capture slides and build a PDF with notes</label>
+    <label class="check"><input type="checkbox" id="fWhisper"> Locally transcribe meeting playback with Whisper (no API key)</label>
+    <div class="hint">Captures all audio from the default Windows speaker output using WASAPI loopback; Meet captions still drive attendance detection. The free Whisper base model downloads on first use and runs locally on CPU. Keep meeting audio unmuted.</div>
     <div class="row" style="margin-top:.6rem">
       <div><label class="f">Captions language (what the teacher speaks)</label>
         <select id="fCapLang"><option value="urdu">Urdu (understands English words too)</option><option value="english">English</option><option value="keep">Keep Meet's own setting</option></select></div>
@@ -305,7 +307,7 @@ function fillSettings() {
   $("sName").value = s.name || ""; $("sRoll").value = s.roll_no || "";
   $("sNames").value = (s.urdu_names || []).join("\n");
   $("sMinP").value = CFG.settings.min_participants;
-  $("fNotes").checked = f.notes; $("fAI").checked = f.ai_summary; $("fCalled").checked = f.called_alert; $("fSlides").checked = f.slides;
+  $("fNotes").checked = f.notes; $("fAI").checked = f.ai_summary; $("fCalled").checked = f.called_alert; $("fSlides").checked = f.slides; $("fWhisper").checked = f.whisper_transcription;
   $("fMode").value = f.slide_mode; $("fInt").value = f.slide_interval;
   $("fCapLang").value = f.caption_language; $("fNotesLang").value = f.notes_language; $("fKey").value = f.keyframe_interval;
   $("fPdfDetail").value = f.pdf_detail; $("fPdfPaper").value = f.pdf_paper_size;
@@ -327,6 +329,7 @@ async function saveSettings() {
     student: { name: $("sName").value, roll_no: $("sRoll").value, urdu_names: $("sNames").value },
     settings: { min_participants: $("sMinP").value },
     features: { notes: $("fNotes").checked, ai_summary: $("fAI").checked, called_alert: $("fCalled").checked,
+                whisper_transcription: $("fWhisper").checked,
                 slides: $("fSlides").checked, slide_mode: $("fMode").value, slide_interval: $("fInt").value,
                 caption_language: $("fCapLang").value, notes_language: $("fNotesLang").value, keyframe_interval: $("fKey").value,
                 pdf_detail: $("fPdfDetail").value, pdf_paper_size: $("fPdfPaper").value,
@@ -348,6 +351,7 @@ async function loadNotes() {
       <span class="spacer"></span>
       ${n.pdf ? `<a href="/notes/${encodeURI(n.folder)}/notes.pdf" target="_blank"><b>Lecture notes PDF</b></a>` : ""}
       ${(!n.pdf && n.html) ? `<a href="/notes/${encodeURI(n.folder)}/notes.html" target="_blank"><b>Lecture notes</b> (open &amp; Print → PDF)</a>` : ""}
+      ${(n.pdf || n.html) && n.done ? `<a href="/notes/${encodeURI(n.folder)}/study" target="_blank"><b>Open notes + study chat</b></a>` : ""}
       <a href="/notes/${encodeURI(n.folder)}/transcript.md" target="_blank">Transcript</a>
       ${n.corrected_transcript ? `<a href="/notes/${encodeURI(n.folder)}/transcript_corrected.md" target="_blank">AI-corrected transcript</a>` : ""}
     </div>`).join("") : '<div class="empty">No notes yet — they appear after your first Meet class.</div>';

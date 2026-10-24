@@ -58,6 +58,27 @@ def merge_text(old: str, new: str) -> Optional[str]:
     return None
 
 
+def _caption_points(text: str) -> Tuple[str, List[str]]:
+    """Make a conservative, caption-only explanation when AI notes are unavailable."""
+    sentences = [part.strip(" -\t") for part in re.split(r"(?<=[.!?؟])\s+", text) if part.strip(" -\t")]
+    if not sentences and text.strip():
+        sentences = [text.strip()]
+    if len(sentences) == 1 and len(sentences[0]) > 240:
+        words = sentences[0].split()
+        sentences = []
+        current = ""
+        for word in words:
+            if current and len(current) + len(word) + 1 > 220:
+                sentences.append(current)
+                current = ""
+            current = f"{current} {word}".strip()
+        if current:
+            sentences.append(current)
+    first = sentences[0][:240] if sentences else ""
+    bullets = sentences[1:5]
+    return first, bullets
+
+
 class NotesRecorder:
     def __init__(self, cls: Dict, config: Dict):
         self.cls = cls
@@ -102,6 +123,29 @@ class NotesRecorder:
         if self.enabled:
             self._maybe_flush()
         return touched
+
+    def add_audio_transcript(self, text: str) -> bool:
+        """Store local audio ASR unless the same recent speech is already captioned."""
+        normalized = lambda value: re.sub(r"\W+", " ", value.casefold()).strip()
+        whisper_text = normalized(text)
+        if not whisper_text:
+            return False
+        now = datetime.now(PKT)
+        recent = [
+            segment.text for segment in self.segments
+            if (now - segment.ts).total_seconds() <= 30
+        ]
+        whisper_words = whisper_text.split()
+        caption_words = normalized(" ".join(recent)).split()
+        if len(whisper_words) >= 6 and caption_words:
+            matcher = SequenceMatcher(None, whisper_words, caption_words, autojunk=False)
+            matched_words = sum(block.size for block in matcher.get_matching_blocks())
+            if matched_words / len(whisper_words) >= 0.7:
+                return False
+        elif len(whisper_text) >= 25 and whisper_text in " ".join(caption_words):
+            return False
+        self.feed([("Local audio (Whisper)", text)])
+        return True
 
     def add_slide(self, rel_file: str, kind: str = "slide") -> int:
         n = len(self.slides) + 1
@@ -284,11 +328,17 @@ class NotesRecorder:
         for i, sl in enumerate(self.slides):
             t_next = self.slides[i + 1]["t"] if i + 1 < len(self.slides) else ended.timestamp()
             ai = ai_slides.get(sl["n"], {})
+            raw = " ".join(per.get(sl["n"], "").split())[:900]
+            caption_takeaway, caption_bullets = _caption_points(raw)
+            ai_takeaway = str(ai.get("takeaway") or "").strip()
+            ai_bullets = ai.get("bullets") or []
             rows.append({
                 "n": sl["n"], "file": sl["file"], "time": sl["time"], "kind": sl.get("kind", "slide"),
                 "dur_s": max(1.0, t_next - sl["t"]),
-                "takeaway": ai.get("takeaway"), "bullets": ai.get("bullets"),
-                "raw": " ".join(per.get(sl["n"], "").split())[:900],
+                "takeaway": ai_takeaway or caption_takeaway,
+                "bullets": ai_bullets or caption_bullets,
+                "summary_source": "AI summary" if ai_takeaway or ai_bullets else "Caption notes",
+                "raw": raw,
                 "flags": [f for f in flags if f["slide"] == sl["n"]],
             })
         ctx = {

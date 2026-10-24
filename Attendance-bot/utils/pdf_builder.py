@@ -231,14 +231,15 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                  + ('<span class="snapbadge">live snapshot (video / whiteboard)</span>' if s["kind"] == "moment" else "")
                  + "</div>",
                  f'<img src="{_e(s["file"])}" alt="{label} {s["n"]}">']
-        if s.get("takeaway"):
-            parts.append(f'<div class="take"><small>Key takeaway</small><span dir="auto">{_e(s["takeaway"])}</span></div>')
+        parts.append(f'<div class="take"><small>What this screenshot relates to · {_e(s.get("summary_source") or "Lecture notes")}</small>'
+                     + (f'<span dir="auto">{_e(s["takeaway"])}</span>' if s.get("takeaway")
+                        else '<span>No related captions were captured during this moment.</span>') + '</div>')
         if s.get("bullets"):
-            parts.append('<div class="notes"><h3>Notes</h3>' + _ul(s["bullets"]) + "</div>")
+            parts.append('<div class="notes"><h3>What the teacher explained</h3>' + _ul(s["bullets"]) + "</div>")
         elif s.get("raw"):
-            parts.append(f'<div class="notes"><h3>What was said (raw captions)</h3><div class="raw" dir="auto">{_e(s["raw"])}</div></div>')
+            parts.append(f'<div class="notes"><h3>What the teacher explained (captions)</h3><div class="raw" dir="auto">{_e(s["raw"])}</div></div>')
         else:
-            parts.append('<div class="notes none">No captions were spoken while this was on screen.</div>')
+            parts.append('<div class="notes none">No related explanation was captured while this was on screen.</div>')
         for f in s.get("flags", []):
             parts.append(f'<div class="flag" style="margin-top:8px">{_pill(f["kind"], f["label"])}'
                          f'<div dir="auto">{_e(f["text"])} <span class="t">· {_e(f["time"])}</span></div></div>')

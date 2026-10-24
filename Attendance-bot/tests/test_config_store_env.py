@@ -10,6 +10,15 @@ from core import config_store
 
 
 class AIKeyEnvironmentTests(unittest.TestCase):
+    @patch("core.config_store.save_raw")
+    @patch("core.config_store.load_raw", return_value={"features": {}})
+    def test_whisper_transcription_can_be_disabled(self, _load, save_raw):
+        self.assertTrue(config_store.get_features({})["whisper_transcription"])
+
+        config_store.update_settings({"features": {"whisper_transcription": False}})
+
+        self.assertFalse(save_raw.call_args.args[0]["features"]["whisper_transcription"])
+
     def test_dashboard_key_is_saved_to_env_not_schedule(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / ".env"

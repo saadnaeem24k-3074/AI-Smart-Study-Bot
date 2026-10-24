@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import re
 import time as _time
 from collections import deque
@@ -9,6 +10,7 @@ from playwright.async_api import async_playwright, BrowserContext
 from core.logger import setup_logger
 from detection.attendance_detector import AttendanceDetector
 from detection.burst_detector import BurstDetector
+from detection.whisper_asr import WhisperRecognizer
 from core import config_store
 from utils.alerts import CalledAlert
 from utils.slide_capture import SlideCapture
@@ -63,6 +65,8 @@ class MeetHandler:
         self._caption_check_started = 0.0
         self._caption_seen = False
         self._caption_warning_logged = False
+        self.whisper = None
+        self._whisper_texts: queue.Queue = queue.Queue()
 
     def attach_recorder(self, rec):
         """Hook up lecture notes + slide capture for this session."""
@@ -103,7 +107,6 @@ class MeetHandler:
                 "--disable-blink-features=AutomationControlled",
                 "--use-fake-ui-for-media-stream",
                 "--disable-notifications",
-                "--mute-audio",
                 "--start-maximized",
             ],
             ignore_default_args=["--enable-automation"],
@@ -148,6 +151,20 @@ class MeetHandler:
             pass
 
         logger.info("[Meet] Joined successfully with mic/cam OFF.")
+        if (self.recorder is not None and self.recorder.enabled
+                and self.features.get("whisper_transcription", True)):
+            self.whisper = WhisperRecognizer(on_transcript=self._whisper_texts.put)
+            self.whisper.start()
+
+    def _record_whisper_transcripts(self):
+        if self.recorder is None:
+            return
+        while True:
+            try:
+                text = self._whisper_texts.get_nowait()
+            except queue.Empty:
+                break
+            self.recorder.add_audio_transcript(text)
 
     async def _auto_sign_in(self):
         account  = self.config.get("google_account", {})
@@ -540,6 +557,7 @@ class MeetHandler:
         # Lecture notes + "you were called" alert
         if self.recorder is not None:
             touched = self.recorder.feed(blocks)
+            self._record_whisper_transcripts()
             if self.features.get("called_alert", True):
                 for seg in touched:
                     if not seg.alerted and self.alert.check(cls.get("subject", ""), seg.speaker, seg.text, tg, cls):
@@ -667,6 +685,8 @@ class MeetHandler:
             pass
 
     async def leave(self):
+        if self.whisper is not None:
+            self.whisper.stop()
         try:
             btn = self.page.locator('[aria-label="Leave call"]').first
             if await btn.count() > 0:

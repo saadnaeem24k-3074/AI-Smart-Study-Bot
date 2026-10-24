@@ -81,6 +81,7 @@ class SlideCapture:
         self._last_tick = 0.0
         self._prev_sig: Optional[List[int]] = None
         self._saved_sig: Optional[List[int]] = None
+        self._saved_sigs = {}
         self._cur_rel: Optional[str] = None
         self._cur_kind = "slide"
         self._last_refresh = 0.0
@@ -136,6 +137,7 @@ class SlideCapture:
                 and now - self._last_refresh >= self.REFINE_EVERY):
             await self._shoot(page, info, self.dir.parent / self._cur_rel)   # keep the fuller version
             self._saved_sig = sig
+            self._saved_sigs[self.count] = sig
             self._last_refresh = now
             logger.info(f"Slide {self.count} updated (more content revealed)")
         return False
@@ -145,16 +147,25 @@ class SlideCapture:
         self._unstable_since = None
 
     async def _save(self, page, info, kind: str, sig: List[int]) -> bool:
+        if any(self._same_image(sig, saved) for saved in self._saved_sigs.values()):
+            logger.debug("Skipped a screenshot matching an earlier slide or snapshot")
+            return False
         n = self.count + 1
         rel = f"slides/slide_{n:03d}.jpg"
         if not await self._shoot(page, info, self.dir.parent / rel):
             return False
         self._saved_sig, self._cur_rel, self._cur_kind = sig, rel, kind
+        self._saved_sigs[n] = sig
         self._last_refresh = time.time()
         self.count = n
         self.on_slide(rel, kind)
         logger.info(f"{'Snapshot' if kind == 'moment' else 'Slide'} {n} captured ({info['w']}x{info['h']})")
         return True
+
+    @classmethod
+    def _same_image(cls, a: List[int], b: List[int]) -> bool:
+        mean, frac = _stats(a, b)
+        return mean < cls.NEW_MEAN and frac < cls.NEW_FRAC
 
     async def _shoot(self, page, info, path: Path) -> bool:
         self.dir.mkdir(parents=True, exist_ok=True)

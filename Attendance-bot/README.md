@@ -21,19 +21,21 @@ Windows 11 · Local Machine · NVIDIA GPU Supported
   - **At a glance:** a contact sheet of every slide (click to jump).
   - **One page per slide:** the screenshot, what was said while it was up, and any flagged moments.
   - **Full timed transcript** at the end.
+- **Study chat** — open **Notes → Open notes + study chat** in the dashboard to view a class PDF beside a chatbot. Questions are answered from that class's saved notes/transcript using the configured AI provider; add a key in Settings to use it. The assistant says when the source material does not include an answer.
 - **AI study notes (pick a provider in Dashboard → Settings → AI: Anthropic Claude, DeepSeek or Google Gemini; each key is stored locally in `.env`)** — the transcript is sent to the configured model and transformed into organized topic headings, explanations, formulas, examples, a summary, key terms, homework/deadlines, and a self-test. The PDF puts these study notes before any optional transcript appendix. If AI generation fails, the bot logs the provider error and marks the PDF accordingly; the original transcript is preserved separately.
 - **PDF options (Dashboard → Settings)** — choose concise or detailed notes, A4 or US Letter paper, and whether to append the full transcript. The original full transcript is always saved separately as `transcript.md`.
-- **Smart slide capture** — a new screenshot is taken when the slide changes; if the teacher reveals bullets one by one the **same slide's screenshot is updated** so you keep the complete version; while the screen is a video / whiteboard / scrolling document it takes a **snapshot every 30 s** (Settings). Don't minimise the bot's Chrome window — minimised windows give blank screenshots. If a presentation isn't detected, set *Slide capture mode* to **always**.
+- **Smart slide capture** — a new screenshot is taken when the slide changes; near-duplicate images already captured are skipped, and if the teacher reveals bullets one by one the **same slide's screenshot is updated** so you keep the complete version. While the screen is a video / whiteboard / scrolling document it takes a **snapshot every 30 s** (Settings). Each screenshot page includes a topic takeaway and teacher-explanation bullets from AI or the captured captions. Don't minimise the bot's Chrome window — minimised windows give blank screenshots. If a presentation isn't detected, set *Slide capture mode* to **always**.
 - **Caption language** — Meet captions one language at a time. Default is Urdu (it also writes English words phonetically, which the detector understands). Choose **English** or *Keep Meet's own* in Settings, or per class in Schedule → Edit → *Captions language*. For an English YouTube lecture, choose **English**.
 - **Video transcripts** — the bot records Google Meet's visible live captions; it does not fetch YouTube's own subtitle/transcript track. When a teacher plays a video, they must share the tab/screen with audio enabled and Meet captions must be on in a matching language. The bot warns in the log if captions have not appeared after 30 seconds.
+- **Local video transcription** — Notes → Settings → Features enables the free `faster-whisper` base model, which listens to meeting playback through Windows WASAPI loopback, detects the spoken language, and adds speech missing from Meet captions to the lecture transcript. It runs locally on CPU (no account or API key); its model downloads once on first use. It needs the meeting audio unmuted and audible on the default Windows output. Loopback captures all audio rendered by that output device during class, not just Meet; it is kept locally. Meet captions still drive attendance detection, and duplicate recent caption text is filtered from the notes.
 - **Transcript cleanup** — Meet remains the source of the transcript, so its live-caption errors cannot be recovered if Meet never recognized the words. With AI enabled, the bot now conservatively proofreads each captured caption segment, keeps the original `transcript.md`, and saves a separate `transcript_corrected.md`; uncertain corrections should be checked against the original/audio. Caption polling runs once per second and ignores common Meet/chat UI text.
 - **"You were called" alert** — beeps + an always-on-top popup when your name or roll number is said, even outside roll call.
 - **Chat fix** — the bot re-opens the chat panel before sending (caption settings used to hide it), retries a failed "Present" up to 5 times, only marks you present if it was really sent, and pops a loud alert if it gave up so you can type it yourself. A proof screenshot of each sent message goes to `screenshots/`.
-- Console logging no longer crashes on Urdu characters; `tzdata` is installed by setup; PyTorch/Whisper (2.4 GB, unused) is no longer installed.
+- Console logging no longer crashes on Urdu characters; setup installs local `faster-whisper` (no PyTorch or CUDA required) and `tzdata`.
 
 **Security notes:** the dashboard listens on this PC only (`127.0.0.1`). API keys are stored in the ignored local `.env` file, not `config/schedule.json`; never commit or share `.env`. To open the dashboard from your phone set `"dashboard": {"host": "0.0.0.0"}`, but only on a network you trust.
 
-**Upgrading an existing install:** extract this zip over your project folder (replace files). Your `venv`, `profiles` (Google login) and `logs` folders are not in the zip, so they stay as they are. Then run `venv\Scripts\activate` and `pip install tzdata` once.
+**Upgrading an existing install:** extract this zip over your project folder (replace files). Your `venv`, `profiles` (Google login) and `logs` folders are not in the zip, so they stay as they are. Then run `venv\Scripts\activate` and `pip install faster-whisper "tzdata"` once.
 
 ---
 
@@ -287,19 +289,11 @@ No other files need to change.
 
 ---
 
-## GPU Acceleration (NVIDIA)
+## Local Speech Transcription
 
-Whisper speech recognition uses CUDA automatically:
-```bat
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-```
+The optional feature uses the free, open-source `faster-whisper` package with the multilingual `base` model, CPU int8 inference, and automatic language detection. The package is installed by `smart_setup.bat`; the model files download from Hugging Face the first time the feature starts and are cached locally. No PyTorch, CUDA, account, or paid API key is needed.
 
-Verify GPU is detected:
-```python
-import torch
-print(torch.cuda.is_available())   # Should print: True
-print(torch.cuda.get_device_name(0))  # Your GPU name
-```
+On Windows it captures rendered sound via WASAPI loopback from the default Windows output device. This includes other audio played by that device during class, not only Meet. Meeting playback must remain unmuted and audible through that device. In the dashboard, open **Settings → Features** and enable **Locally transcribe meeting playback with Whisper**. If CPU usage is too high, disable it; the Google Meet caption reader continues to work independently.
 
 ---
 
@@ -311,7 +305,8 @@ print(torch.cuda.get_device_name(0))  # Your GPU name
 | Captions not reading | Update selectors in `utils/selectors.py` |
 | "Join" button not found | Add `await asyncio.sleep(5)` before `_click_join()` |
 | Zoom opens app instead of browser | Ensure link is `/j/` format, handler auto-converts |
-| Audio not captured by Whisper | Install VB-Audio Virtual Cable |
+| Local transcription has no audio | Ensure meeting audio is unmuted/audible on the Windows default output device; restart the class after changing the device |
+| Whisper model or package unavailable | Run `venv\Scripts\activate` then `pip install faster-whisper`; check the bot log for model-download errors |
 | Bot crashes repeatedly | Check `logs/watchdog.log` for error details |
 | Wrong time zone | Change `PKT = ZoneInfo("Asia/Karachi")` in scheduler.py |
 
@@ -322,14 +317,14 @@ print(torch.cuda.get_device_name(0))  # Your GPU name
 ```
 playwright==1.44.0          Browser automation
 schedule==1.2.1             Class scheduling
-openai-whisper==20231117    GPU speech recognition (optional)
+faster-whisper              Local multilingual speech recognition
 flask==3.0.3                Dashboard web server
 flask-socketio==5.3.6       Real-time dashboard updates
 gspread==6.1.2              Google Sheets export (optional)
 openpyxl==3.1.2             Excel attendance log
 colorlog==6.8.2             Colored terminal output
 rich==13.7.1                Pretty terminal tables
-sounddevice==0.4.6          System audio capture
+sounddevice==0.4.6          WASAPI loopback audio capture
 ```
 
 ---

@@ -241,6 +241,16 @@
       "link": "https://meet.google.com/tuq-ohcj-uxq",
       "id": "e804f6b6",
       "once": true
+    },
+    {
+      "day": "Friday",
+      "time": "23:40",
+      "duration": 9,
+      "subject": "Quick join",
+      "platform": "meet",
+      "link": "https://meet.google.com/wuc-frzj-tef",
+      "id": "2b23581b",
+      "once": true
     }
   ],
   "features": {

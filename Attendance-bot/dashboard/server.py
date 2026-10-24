@@ -23,6 +23,8 @@ from flask_socketio import SocketIO
 
 from core import config_store
 from dashboard.page import PAGE
+from dashboard import study_page
+from utils import ai_notes
 from utils.state_store import StateStore
 
 app = Flask(__name__)
@@ -51,6 +53,14 @@ def _missing(e):
 
 def _body() -> dict:
     return request.get_json(silent=True) or {}
+
+
+def _note_directory(folder: str) -> Path:
+    root = NOTES_ROOT.resolve()
+    target = (root / folder).resolve()
+    if root not in target.parents or not (target / "meta.json").is_file():
+        abort(404)
+    return target
 
 
 # ───────────────────────── pages ─────────────────────────
@@ -139,6 +149,57 @@ def notes_file(p):
     if target.suffix == ".md":      # show in the browser instead of downloading
         return Response(target.read_text(encoding="utf-8"), mimetype="text/plain; charset=utf-8")
     return send_from_directory(root, p)
+
+
+@app.get("/notes/<path:folder>/study")
+def notes_study(folder):
+    directory = _note_directory(folder)
+    try:
+        meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        abort(404)
+    if not meta.get("done"):
+        abort(409, description="These notes are still being generated.")
+    document = "notes.pdf" if (directory / "notes.pdf").is_file() else "notes.html"
+    if not (directory / document).is_file():
+        abort(404)
+    return Response(study_page.render(folder, meta.get("subject", "Lecture"), document),
+                    mimetype="text/html")
+
+
+@app.post("/api/notes/<path:folder>/chat")
+def notes_chat(folder):
+    directory = _note_directory(folder)
+    try:
+        meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        abort(404)
+    if not meta.get("done"):
+        return jsonify(error="These notes are still being generated."), 409
+
+    body = _body()
+    if not isinstance(body, dict):
+        return jsonify(error="A JSON object is required."), 400
+    question = body.get("question")
+    if not isinstance(question, str) or not question.strip() or len(question.strip()) > 1000:
+        return jsonify(error="Enter a question of 1 to 1000 characters."), 400
+    question = question.strip()
+    history = body.get("history", [])
+    if not isinstance(history, list):
+        return jsonify(error="Chat history must be a list of messages."), 400
+    config = config_store.load_raw()
+    if not ai_notes.api_key(config):
+        return jsonify(error="Add an AI provider key in Dashboard → Settings to use the study chat."), 503
+    transcript_path = directory / "transcript.md"
+    if not transcript_path.is_file():
+        abort(404)
+    context = transcript_path.read_text(encoding="utf-8")
+    if len(context.strip()) < 10:
+        return jsonify(error="There is not enough saved lecture material to answer questions."), 422
+    answer = ai_notes.answer_question(config, context, question, history)
+    if answer is None:
+        return jsonify(error="The AI provider could not answer right now. Check its key and try again."), 502
+    return jsonify(answer=answer)
 
 
 class DashboardServer:

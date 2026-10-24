@@ -31,6 +31,7 @@ DEFAULT_FEATURES = {
     "ai_summary": True,       # LLM summary at class end (needs API key)
     "called_alert": True,     # sound + popup when your name is called
     "slides": True,           # capture slides + build PDF with notes
+    "whisper_transcription": True,  # local transcription of meeting playback for lecture notes
     "slide_mode": "auto",     # auto | always | off
     "slide_interval": 4,      # seconds between slide checks
     "keyframe_interval": 30,  # snapshot every N sec while the screen is a video/whiteboard (0 = off)
@@ -184,7 +185,7 @@ def update_settings(data: Dict) -> None:
         ft = data.get("features")
         if isinstance(ft, dict):
             cur = cfg.setdefault("features", {})
-            for k in ("notes", "ai_summary", "called_alert", "slides"):
+            for k in ("notes", "ai_summary", "called_alert", "slides", "whisper_transcription"):
                 if k in ft:
                     cur[k] = bool(ft[k])
             if "slide_mode" in ft:

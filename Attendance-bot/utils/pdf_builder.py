@@ -2,15 +2,14 @@
 Lecture-notes document builder (HTML → PDF).
 
 Pages:
-  1  Cover      – subject, stats, slide timeline bar, AI summary, exam radar,
-                  homework checklist, key terms
+  1  Cover      – lecture title, stats, slide timeline, summary, key moments
   2  At a glance – contact sheet of every slide (click a thumbnail to jump)
-  3… Slides     – one page per slide: screenshot, takeaway, notes, flagged moments
-  …  Self-test  – questions, then an answers page (AI)
+  3… Study notes – slide explanations, defined glossary terms, examples and steps
+  …  Self-test  – questions and answers together
   …  Transcript – the full timed transcript
 
-Works with no slides (talk-only lecture) and with no AI key (offline flags,
-keywords and raw captions are used instead).
+Works with no slides (talk-only lecture) and with no AI key (offline complete-sentence
+flags and caption notes are used instead).
 
 The HTML uses relative image paths (slides/slide_001.jpg) so notes.html works
 standalone. The PDF is rendered by a separate headless Chromium (page.pdf() only
@@ -19,6 +18,7 @@ the HTML is kept — open it and use Print → Save as PDF.
 """
 
 import html
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -39,8 +39,9 @@ body { margin: 0; color: #0f172a; font-size: 10.5pt; line-height: 1.55;
   font-family: "Segoe UI", "Noto Sans", "Noto Naskh Arabic", "Urdu Typesetting", Arial, sans-serif; }
 [dir="auto"], .rtl { unicode-bidi: plaintext; }
 h1, h2, h3, p { margin: 0; }
-section.page { break-after: page; }
+section.page { break-after: page; break-inside: auto; }
 section.page:last-of-type { break-after: auto; }
+.page > h2, .card h2, .slide .sh { break-after: avoid; }
 .hero { border-radius: 14px; padding: 22px 24px; color: #fff;
   background: linear-gradient(135deg, #4338ca 0%, #7c3aed 55%, #db2777 120%); }
 .kicker { font-size: 8.5pt; letter-spacing: .18em; opacity: .85; font-weight: 700; }
@@ -56,12 +57,18 @@ section.page:last-of-type { break-after: auto; }
 .card.radar { border-left: 5px solid #e11d48; background: #fff7f8; }
 .card.todo { border-left: 5px solid #2563eb; }
 .card.terms { border-left: 5px solid #10b981; }
+.card.terms h3 { color: #047857; font-size: 12pt; margin-bottom: 7px; }
 .card.lecture { border-left: 5px solid #7c3aed; }
 .card.lecture h3 { font-size: 13pt; color: #312e81; margin-bottom: 6px; }
+.card.lecture h4 { color: #475569; font-size: 9pt; margin: 8px 0 4px; }
 .key-idea { color: #334155; margin-bottom: 7px; }
 .formula { background: #f1f5f9; border-left: 3px solid #7c3aed; padding: 6px 10px;
   margin: 5px 0; font-family: Consolas, "Cambria Math", monospace; white-space: pre-wrap; }
 .example { border-left: 3px solid #10b981; padding: 5px 10px; margin: 5px 0; background: #f0fdf4; }
+.glossary { display: grid; grid-template-columns: 1fr 2fr; gap: 0 14px; }
+.glossary dt, .glossary dd { margin: 0; padding: 6px 0; border-bottom: 1px solid #e2e8f0; break-inside: avoid; }
+.glossary dt { color: #047857; font-weight: 750; }
+.glossary dd { color: #334155; }
 ol.num { margin: 0; padding: 0; list-style: none; counter-reset: n; }
 ol.num li { counter-increment: n; position: relative; padding-left: 28px; margin-bottom: 6px; }
 ol.num li::before { content: counter(n); position: absolute; left: 0; top: 1px; width: 19px; height: 19px;
@@ -71,11 +78,9 @@ ul.check li { position: relative; padding-left: 24px; margin-bottom: 5px; }
 ul.check li::before { content: ""; position: absolute; left: 0; top: 4px; width: 12px; height: 12px;
   border: 2px solid #2563eb; border-radius: 3px; }
 ul.plain { margin: 0; padding-left: 18px; } ul.plain li { margin-bottom: 4px; }
-.tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.tag { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 6px; padding: 2px 9px; font-size: 9.5pt; font-weight: 600; }
 .pill { display: inline-block; border-radius: 5px; padding: 1px 8px; font-size: 7.5pt; font-weight: 800;
   letter-spacing: .06em; color: #fff; vertical-align: 1px; }
-.flag { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 7px; }
+.flag { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 7px; break-inside: avoid; }
 .flag .pill { flex: none; margin-top: 3px; } .flag .t { color: #64748b; font-size: 8.5pt; }
 .hint { margin-top: 12px; padding: 9px 13px; border-radius: 10px; background: #f1f5f9; color: #475569; font-size: 9pt; }
 .tl { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 14px; border: 1px solid #e2e8f0; }
@@ -125,9 +130,47 @@ def _color(n: int) -> str:
     return PALETTE[(n - 1) % len(PALETTE)]
 
 
+def _lecture_title(ctx: Dict) -> str:
+    summary = ctx.get("summary") or {}
+    for candidate in (
+        ctx.get("title"),
+        summary.get("title"),
+        next((section.get("heading") for section in (summary.get("sections") or [])
+              if isinstance(section, dict) and section.get("heading")), ""),
+        ctx.get("subject"),
+    ):
+        title = " ".join(str(candidate or "").split()).strip()
+        if title and not re.fullmatch(
+            r"(quick\s*join|meeting|google\s*meet|zoom|wisper|whisper|class)",
+            title,
+            flags=re.I,
+        ):
+            return title[:120]
+    keywords = [str(word).strip() for word in (ctx.get("keywords") or []) if str(word).strip()]
+    if keywords:
+        return ", ".join(keywords[:3])
+    return "Lecture Notes"
+
+
+def _radar_items(emphasis: List[str], flags: List[Dict]) -> List[Dict]:
+    items, seen = [], []
+    for item in [*flags, *({"text": text, "kind": "", "label": "", "time": "", "slide": 0}
+                          for text in emphasis)]:
+        text = " ".join(str(item.get("text") or "").split())
+        words = set(re.findall(r"\w+", text.casefold(), re.UNICODE))
+        if not words or any(
+            len(words & previous) / min(len(words), len(previous)) >= 0.8
+            for previous in seen
+        ):
+            continue
+        seen.append(words)
+        items.append({**item, "text": text})
+    return items
+
+
 def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     options = options or {}
-    subject, slides = ctx["subject"], ctx.get("slides", [])
+    subject, slides = _lecture_title(ctx), ctx.get("slides", [])
     summary = ctx.get("summary") or {}
     flags = ctx.get("flags", [])
     total_s = max(1, ctx.get("duration_s", 1))
@@ -137,7 +180,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         chips.append(f"{len(slides)} slides")
     chips += [f'{ctx.get("words", 0):,} words', f'{ctx.get("speakers", 0)} speaker(s)']
     if flags:
-        chips.append(f"{len(flags)} flagged moments")
+        chips.append(f"{len(flags)} flagged moment{'s' if len(flags) != 1 else ''}")
 
     cover = [f'<div class="hero"><div class="kicker">LECTURE NOTES</div><h1 dir="auto">{_e(subject)}</h1>'
              f'<div class="when">{_e(ctx["date_str"])}</div>'
@@ -152,23 +195,34 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                      f'<span>time on each slide</span><span>{_e(ctx.get("end_time", ""))}</span></div>')
 
     if summary:
-        if summary.get("title"):
-            cover.append(f'<div class="card summary"><h2>{_e("Lecture in one line")}</h2>'
-                         f'<div dir="auto" style="font-weight:700;font-size:12pt">{_e(summary["title"])}</div></div>')
         if summary.get("summary"):
             cover.append('<div class="card summary"><h2>Summary</h2><ol class="num">'
                          + "".join(f'<li dir="auto">{_e(x)}</li>' for x in summary["summary"]) + "</ol></div>")
 
-    radar = ""
-    if summary.get("emphasis"):
-        radar += _ul([str(x) for x in summary["emphasis"]])
-    if flags:
-        radar += "".join(
-            f'<div class="flag">{_pill(f["kind"], f["label"])}<div dir="auto">{_e(f["text"])} '
-            f'<span class="t">· {_e(f["time"])}{" · slide " + str(f["slide"]) if f["slide"] else ""}</span></div></div>'
-            for f in flags)
-    if radar:
-        cover.append(f'<div class="card radar"><h2>Exam radar — what the teacher stressed</h2>{radar}</div>')
+    radar_items = _radar_items(summary.get("emphasis") or [], flags)
+    if radar_items:
+        seen_kinds = set()
+        radar = []
+        for item in radar_items:
+            kind = str(item.get("kind") or "")
+            badge = _pill(kind, item.get("label") or kind.title()) if kind and kind not in seen_kinds else ""
+            if kind:
+                seen_kinds.add(kind)
+            time = str(item.get("time") or "").strip()
+            slide = item.get("slide")
+            location = " · ".join(
+                value for value in (
+                    time,
+                    f"Slide {slide}" if slide else "",
+                ) if value
+            )
+            radar.append(
+                f'<div class="flag">{badge}<div dir="auto">{_e(item["text"])}'
+                f'{f" <span class=t>· {_e(location)}</span>" if location else ""}</div></div>'
+            )
+        cover.append(
+            f'<div class="card radar"><h2>Key moments</h2>{"".join(radar)}</div>'
+        )
 
     todo = []
     for h in summary.get("homework", []) or []:
@@ -178,11 +232,10 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     if todo:
         cover.append('<div class="card todo"><h2>Homework &amp; deadlines</h2>' + _ul(todo, "check") + "</div>")
 
-    terms = [str(t) for t in (summary.get("key_terms") or [])] or ctx.get("keywords", [])
-    if terms:
-        lab = "Key terms" if summary.get("key_terms") else "Most repeated terms"
-        cover.append(f'<div class="card terms"><h2>{lab}</h2><div class="tags">'
-                     + "".join(f'<span class="tag" dir="auto">{_e(t)}</span>' for t in terms) + "</div></div>")
+    terms = [
+        term for term in (summary.get("key_terms") or [])
+        if isinstance(term, dict) and term.get("term") and term.get("definition")
+    ]
 
     if not summary:
         if ctx.get("ai_requested"):
@@ -191,7 +244,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         else:
             cover.append('<div class="hint">AI notes were not generated. Add an AI provider key and enable AI summaries '
                          'in Dashboard → Settings to create organized study notes.</div>')
-    pages = [f'<section class="page">{"".join(cover)}</section>']
+    pages = [f'<section class="page cover">{"".join(cover)}</section>']
 
     # ── structured AI study notes ─────────────────────────
     if summary.get("sections"):
@@ -202,6 +255,10 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                 body.append(f'<p class="key-idea" dir="auto"><b>Key idea:</b> {_e(section["key_idea"])}</p>')
             if section.get("bullets"):
                 body.append(_ul(section["bullets"]))
+            if section.get("steps"):
+                body.append('<h4>Steps</h4><ol class="num">'
+                            + "".join(f'<li dir="auto">{_e(item)}</li>' for item in section["steps"])
+                            + "</ol>")
             if section.get("equations"):
                 body.append('<h4>Equations &amp; formulas</h4>')
                 body.extend(f'<div class="formula" dir="auto">{_e(item)}</div>' for item in section["equations"])
@@ -209,9 +266,28 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                 body.append('<h4>Examples</h4>')
                 body.extend(f'<div class="example" dir="auto">{_e(item)}</div>' for item in section["examples"])
             cards.append(f'<div class="card lecture">{"".join(body)}</div>')
+        if terms:
+            cards.append(
+                '<div class="card terms"><h3>Key terms</h3><dl class="glossary">'
+                + "".join(
+                    f'<dt dir="auto">{_e(term["term"])}</dt><dd dir="auto">{_e(term["definition"])}</dd>'
+                    for term in terms
+                )
+                + "</dl></div>"
+            )
         pages.append('<section class="page"><h2 class="pg">Organized study notes</h2>'
                      '<div class="sub">Key concepts, explanations, formulas, and examples from the lecture.</div>'
                      + "".join(cards) + "</section>")
+    elif terms:
+        pages.append(
+            '<section class="page"><h2 class="pg">Key terms</h2>'
+            '<dl class="card terms glossary">'
+            + "".join(
+                f'<dt dir="auto">{_e(term["term"])}</dt><dd dir="auto">{_e(term["definition"])}</dd>'
+                for term in terms
+            )
+            + "</dl></section>"
+        )
 
     # ── at a glance ─────────────────────────────────────
     if slides:
@@ -240,19 +316,20 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             parts.append(f'<div class="notes"><h3>What the teacher explained (captions)</h3><div class="raw" dir="auto">{_e(s["raw"])}</div></div>')
         else:
             parts.append('<div class="notes none">No related explanation was captured while this was on screen.</div>')
-        for f in s.get("flags", []):
-            parts.append(f'<div class="flag" style="margin-top:8px">{_pill(f["kind"], f["label"])}'
-                         f'<div dir="auto">{_e(f["text"])} <span class="t">· {_e(f["time"])}</span></div></div>')
         pages.append(f'<section class="page slide" id="s{s["n"]}">{"".join(parts)}</section>')
 
     # ── self-test ───────────────────────────────────────
     quiz = [q for q in (summary.get("quiz") or []) if isinstance(q, dict) and q.get("q")]
     if quiz:
-        qs = "".join(f'<div class="qa"><div class="q" dir="auto">{i}. {_e(q["q"])}</div></div>' for i, q in enumerate(quiz, 1))
-        ans = "".join(f'<div class="qa"><div class="q" dir="auto">{i}. {_e(q["q"])}</div>'
-                      f'<div class="a" dir="auto">{_e(q.get("a", ""))}</div></div>' for i, q in enumerate(quiz, 1))
-        pages.append(f'<section class="page"><h2 class="pg">Self-test</h2><div class="sub">Try to answer before you turn the page.</div>{qs}</section>')
-        pages.append(f'<section class="page"><h2 class="pg">Answers</h2><div class="sub">&nbsp;</div>{ans}</section>')
+        qs = "".join(
+            f'<div class="qa"><div class="q" dir="auto">{i}. {_e(q["q"])}</div>'
+            f'<div class="a" dir="auto"><b>Answer:</b> {_e(q.get("a", ""))}</div></div>'
+            for i, q in enumerate(quiz, 1)
+        )
+        pages.append(
+            f'<section class="page"><h2 class="pg">Self-test &amp; answers</h2>'
+            f'<div class="sub">Review each question, then check the answer.</div>{qs}</section>'
+        )
 
     # ── transcript ──────────────────────────────────────
     if ctx.get("transcript") and options.get("include_transcript", False):
@@ -275,10 +352,9 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             f"<style>{CSS}</style></head><body>{''.join(pages)}</body></html>")
 
 
-async def render_pdf(html_path: Path, pdf_path: Path, footer_text: str = "", paper_size: str = "A4") -> bool:
-    footer = (f'<div style="width:100%;font-size:8px;color:#94a3b8;padding:0 14mm;display:flex;'
-              f'justify-content:space-between;font-family:Arial,sans-serif"><span>{_e(footer_text)}</span>'
-              f'<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>')
+async def render_pdf(html_path: Path, pdf_path: Path, paper_size: str = "A4") -> bool:
+    footer = ('<div style="width:100%;font-size:8px;color:#64748b;text-align:center;'
+              'font-family:Arial,sans-serif"><span class="pageNumber"></span></div>')
     try:
         async with async_playwright() as p:
             browser = None

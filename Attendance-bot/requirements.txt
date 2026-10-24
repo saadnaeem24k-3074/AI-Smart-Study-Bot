@@ -16,9 +16,12 @@ tzdata
 # Speech recognition
 SpeechRecognition==3.10.4
 # pyaudio — installed via pipwin in setup.bat (Windows binary)
+setuptools<81
 soundfile==0.12.1
 numpy==1.26.4
-faster-whisper>=1.0.3,<2.0
+faster-whisper==1.2.1
+# Upstream's CUDA 11 workaround for older NVIDIA GPUs overrides faster-whisper's CTranslate2 minimum.
+ctranslate2==3.24.0
 soundcard>=0.4.2,<0.6
 
 # HTTP / WebSocket
@@ -40,4 +43,5 @@ rich==13.7.1
 psutil==5.9.8
 Pillow==10.3.0
 
-# faster-whisper runs locally on CPU (int8); it does not require PyTorch or CUDA.
+# faster-whisper uses CUDA when its NVIDIA runtime libraries are installed; CPU is the fallback.
+# PyTorch is not required.

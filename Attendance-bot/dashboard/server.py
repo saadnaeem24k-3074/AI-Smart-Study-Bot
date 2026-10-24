@@ -163,7 +163,9 @@ def notes_study(folder):
     document = "notes.pdf" if (directory / "notes.pdf").is_file() else "notes.html"
     if not (directory / document).is_file():
         abort(404)
-    return Response(study_page.render(folder, meta.get("subject", "Lecture"), document),
+    return Response(study_page.render(
+        folder, meta.get("lecture_title") or meta.get("subject", "Lecture"), document
+    ),
                     mimetype="text/html")
 
 
@@ -194,6 +196,17 @@ def notes_chat(folder):
     if not transcript_path.is_file():
         abort(404)
     context = transcript_path.read_text(encoding="utf-8")
+    corrected_path = directory / "transcript_corrected.md"
+    if corrected_path.is_file():
+        notes = context.split("## Flagged moments", 1)[0].split("## Transcript", 1)[0].strip()
+        corrected = corrected_path.read_text(encoding="utf-8")
+        corrected_body = corrected.split("## Corrected transcript", 1)
+        context = "\n\n".join(
+            part for part in (
+                notes,
+                corrected_body[-1].strip() if len(corrected_body) == 2 else corrected,
+            ) if part
+        )
     if len(context.strip()) < 10:
         return jsonify(error="There is not enough saved lecture material to answer questions."), 422
     answer = ai_notes.answer_question(config, context, question, history)

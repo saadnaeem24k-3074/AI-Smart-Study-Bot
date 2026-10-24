@@ -24,6 +24,7 @@ FLAG_RULES = [
 ]
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?۔؟])\s+")
+_SENTENCE_END = re.compile(r"[.!?۔؟][\"'”’)]*$")
 _WORD = re.compile(r"[A-Za-z][A-Za-z\-']{3,}")
 _STOP = set("""
 that this with have from they them then than there their what when where which while will would could should about
@@ -46,15 +47,22 @@ def find_flags(segments, limit: int = 12) -> List[Dict]:
             if not m:
                 continue
             sent = next((s for s in _SENT_SPLIT.split(text) if rx.search(s)), text)
-            sent = " ".join(sent.split())
-            if len(sent) > 240:
-                a = max(0, sent.lower().find(m.group(0).lower()) - 100)
-                sent = ("…" if a else "") + sent[a:a + 240] + "…"
-            key = (kind, sent[:60])
+            sent = " ".join(sent.split()).strip(" \"'“”‘’")
+            words = re.findall(r"\b[\w'-]+\b", sent, re.UNICODE)
+            if (
+                len(sent) > 240
+                or len(words) < 5
+                or not _SENTENCE_END.search(sent)
+                or sent.startswith(("…", "..."))
+                or sent.endswith(("…", "..."))
+                or (sent[:1].isascii() and sent[:1].isalpha() and not sent[:1].isupper())
+            ):
+                continue
+            key = (kind, re.sub(r"\W+", " ", sent.casefold()).strip())
             if key in seen:
                 continue
             seen.add(key)
-            out.append({"kind": kind, "label": label, "time": seg.ts.strftime("%H:%M"),
+            out.append({"kind": kind, "label": label, "time": seg.ts.strftime("%H:%M:%S"),
                         "slide": seg.slide, "text": sent})
             break          # one flag per segment is enough
         if len(out) >= limit:

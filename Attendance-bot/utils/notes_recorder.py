@@ -60,23 +60,18 @@ def merge_text(old: str, new: str) -> Optional[str]:
 
 def _caption_points(text: str) -> Tuple[str, List[str]]:
     """Make a conservative, caption-only explanation when AI notes are unavailable."""
-    sentences = [part.strip(" -\t") for part in re.split(r"(?<=[.!?؟])\s+", text) if part.strip(" -\t")]
-    if not sentences and text.strip():
-        sentences = [text.strip()]
-    if len(sentences) == 1 and len(sentences[0]) > 240:
-        words = sentences[0].split()
-        sentences = []
-        current = ""
-        for word in words:
-            if current and len(current) + len(word) + 1 > 220:
-                sentences.append(current)
-                current = ""
-            current = f"{current} {word}".strip()
-        if current:
-            sentences.append(current)
-    first = sentences[0][:240] if sentences else ""
-    bullets = sentences[1:5]
-    return first, bullets
+    sentences = []
+    for part in re.split(r"(?<=[.!?۔؟])\s+", text or ""):
+        sentence = " ".join(part.strip(" -\t\"'“”‘’").split())
+        words = re.findall(r"\b[\w'-]+\b", sentence, re.UNICODE)
+        if (
+            5 <= len(words) <= 45
+            and re.search(r"[.!?۔؟][\"'”’)]*$", sentence)
+            and not sentence.startswith(("…", "..."))
+            and (not sentence[:1].isascii() or not sentence[:1].isalpha() or sentence[:1].isupper())
+        ):
+            sentences.append(sentence)
+    return (sentences[0], sentences[1:5]) if sentences else ("", [])
 
 
 class NotesRecorder:
@@ -84,6 +79,7 @@ class NotesRecorder:
         self.cls = cls
         self.config = config
         self.subject = cls.get("subject", "Class")
+        self.lecture_title = self.subject
         self.features = config_store.get_features(config)
         self.enabled = bool(self.features["notes"])
         self.started = datetime.now(PKT)
@@ -188,7 +184,7 @@ class NotesRecorder:
 
     def _render_md(self, summary: Optional[Dict], flags: Optional[List[Dict]] = None,
                    segments: Optional[List[Segment]] = None) -> str:
-        parts = [f"# {self.subject} — {self.started:%Y-%m-%d}",
+        parts = [f"# {self.lecture_title} — {self.started:%d %B %Y}",
                  f"*Attendance Bot · started {self.started:%H:%M} · captions are auto-generated and may contain errors*\n"]
         if segments is not None:
             parts.append("*AI-corrected captions; compare with `transcript.md` for the original automatic captions.*\n")
@@ -201,14 +197,29 @@ class NotesRecorder:
                 parts.append(f"## {section['heading']}\n")
                 if section.get("key_idea"):
                     parts.append(f"**Key idea:** {section['key_idea']}\n")
-                for key, head in (("bullets", "Concepts"), ("equations", "Equations & formulas"),
-                                  ("examples", "Examples")):
+                if section.get("bullets"):
+                    parts.append("### Concepts\n" + "\n".join(f"- {item}" for item in section["bullets"]) + "\n")
+                if section.get("steps"):
+                    parts.append("### Steps\n" + "\n".join(
+                        f"{i}. {item}" for i, item in enumerate(section["steps"], 1)
+                    ) + "\n")
+                for key, head in (("equations", "Equations & formulas"), ("examples", "Examples")):
                     if section.get(key):
-                        parts.append(f"### {head}\n" + "\n".join(f"- {x}" for x in section[key]) + "\n")
+                        parts.append(f"### {head}\n" + "\n".join(f"- {item}" for item in section[key]) + "\n")
             for key, head in (("emphasis", "Exam radar (stressed by the teacher)"),
-                              ("homework", "Homework / tasks"), ("key_terms", "Key terms")):
+                              ("homework", "Homework / tasks")):
                 if summary.get(key):
                     parts.append(f"## {head}\n" + "\n".join(f"- {x}" for x in summary[key]) + "\n")
+            key_terms = [
+                term for term in (summary.get("key_terms") or [])
+                if isinstance(term, dict) and term.get("term") and term.get("definition")
+            ]
+            if key_terms:
+                parts.append(
+                    "## Key terms\n" + "\n".join(
+                        f"- **{term['term']}:** {term['definition']}" for term in key_terms
+                    ) + "\n"
+                )
             if summary.get("deadlines"):
                 parts.append("## Deadlines\n" + "\n".join(
                     f"- {d.get('item', '')} — {d.get('date', '')}" if isinstance(d, dict) else f"- {d}"
@@ -228,6 +239,7 @@ class NotesRecorder:
                     summary: bool = False, corrected_transcript: bool = False):
         meta = {
             "subject": self.subject, "date": self.started.strftime("%Y-%m-%d"),
+            "lecture_title": self.lecture_title,
             "time": self.started.strftime("%H:%M"), "folder": self.dir.relative_to(NOTES_ROOT).as_posix(),
             "segments": len(self.segments), "slides": len(self.slides),
             "done": done, "pdf": pdf, "html": html, "summary": summary,
@@ -314,8 +326,14 @@ class NotesRecorder:
                     "transcript and offline analysis only. Check the provider error above."
                 )
 
+        keywords = lecture_insights.top_keywords(plain)
+        self.lecture_title = pdf_builder._lecture_title({
+            "subject": self.subject,
+            "summary": summary,
+            "keywords": keywords,
+        })
         per: Dict[int, str] = {}
-        for sg in self.segments:
+        for sg in transcript_segments:
             if sg.slide:
                 per[sg.slide] = (per.get(sg.slide, "") + " " + sg.text).strip()
         ai_slides: Dict[int, Dict] = {}
@@ -323,7 +341,7 @@ class NotesRecorder:
             logger.info(f"[{self.subject}] Writing notes for {len(self.slides)} slides...")
             ai_slides = await ai_notes.slide_notes(self.config, per)
 
-        flags = lecture_insights.find_flags(self.segments)
+        flags = lecture_insights.find_flags(transcript_segments)
         rows = []
         for i, sl in enumerate(self.slides):
             t_next = self.slides[i + 1]["t"] if i + 1 < len(self.slides) else ended.timestamp()
@@ -342,14 +360,15 @@ class NotesRecorder:
                 "flags": [f for f in flags if f["slide"] == sl["n"]],
             })
         ctx = {
-            "subject": self.subject, "date_str": self.started.strftime("%A, %d %B %Y · %H:%M"),
+            "subject": self.subject, "title": self.lecture_title,
+            "date_str": self.started.strftime("%d %B %Y"),
             "end_time": ended.strftime("%H:%M:%S"),
             "duration_s": (ended - self.started).total_seconds(),
             "words": sum(len(sg.text.split()) for sg in self.segments),
             "speakers": len({sg.speaker for sg in self.segments if sg.speaker}),
             "slides": rows, "summary": summary, "flags": flags,
             "ai_requested": use_ai,
-            "keywords": lecture_insights.top_keywords(plain),
+            "keywords": keywords,
             "transcript": self._transcript_groups(transcript_segments),
             "transcript_is_ai_corrected": transcript_segments is not self.segments,
         }
@@ -363,7 +382,6 @@ class NotesRecorder:
             html_ok = True
             pdf_ok = await pdf_builder.render_pdf(
                 html_path, self.dir / "notes.pdf",
-                f"{self.subject} · {self.started:%Y-%m-%d}",
                 self.features.get("pdf_paper_size", "A4"))
         except Exception as e:
             logger.error(f"[{self.subject}] Could not build the notes document: {e}")

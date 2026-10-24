@@ -26,7 +26,7 @@ call venv\Scripts\activate.bat
 echo  Venv created.
 echo.
 echo [3/7] Upgrading pip + setuptools...
-python -m pip install --upgrade pip setuptools wheel
+python -m pip install --upgrade pip "setuptools<81" wheel
 echo.
 echo [4/7] Installing core packages...
 pip install playwright==1.44.0
@@ -42,7 +42,8 @@ echo [5/7] Installing audio + speech packages...
 pip install numpy==1.26.4
 pip install SpeechRecognition==3.10.4
 pip install soundfile==0.12.1 "soundcard>=0.4.2,<0.6"
-pip install "faster-whisper>=1.0.3,<2.0"
+pip install faster-whisper==1.2.1
+pip install --no-deps --force-reinstall ctranslate2==3.24.0
 pip install pyaudio
 if errorlevel 1 (
     echo     pyaudio failed - trying pipwin...

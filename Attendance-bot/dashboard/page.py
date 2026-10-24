@@ -344,7 +344,7 @@ async function loadNotes() {
   const list = await api("GET", "/api/notes");
   $("notesList").innerHTML = list.length ? list.map(n => `
     <div class="notes-item">
-      <b>${esc(n.subject)}</b> <span class="sub mono">${esc(n.date)} ${esc(n.time)}</span>
+      <b>${esc(n.lecture_title || n.subject)}</b> <span class="sub mono">${esc(n.date)} ${esc(n.time)}</span>
       ${n.slides ? `<span class="badge">${n.slides} slides</span>` : ""}
       ${n.summary ? '<span class="badge ok">AI summary</span>' : ""}
       ${n.done ? "" : '<span class="badge warn">in progress</span>'}

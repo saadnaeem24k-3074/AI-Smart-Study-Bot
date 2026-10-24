@@ -1,7 +1,9 @@
 """Local transcription of meeting playback through Windows WASAPI loopback."""
 
+import os
 import queue
 import re
+import sys
 import threading
 from typing import Callable, Optional
 
@@ -48,6 +50,7 @@ class WhisperRecognizer:
         self._capture_finished.set()
         self._last_text = ""
         self._reported_overflow = False
+        self._cuda_dll_directory: Optional[object] = None
 
     @staticmethod
     def _loopback_microphone(soundcard):
@@ -81,11 +84,33 @@ class WhisperRecognizer:
 
     def _capture_loop(self):
         try:
+            if sys.platform == "win32":
+                dll_directory = os.path.dirname(sys.executable)
+                if dll_directory not in os.environ.get("PATH", "").split(os.pathsep):
+                    os.environ["PATH"] = (
+                        dll_directory + os.pathsep + os.environ.get("PATH", "")
+                    )
+                self._cuda_dll_directory = os.add_dll_directory(dll_directory)
             import soundcard
             from faster_whisper import WhisperModel
 
-            logger.info(f"Loading faster-whisper '{self.model_size}' model on CPU (first run downloads it).")
-            self.model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+            try:
+                logger.info(
+                    f"Loading faster-whisper '{self.model_size}' model on the NVIDIA GPU "
+                    "(first run downloads it)."
+                )
+                self.model = WhisperModel(
+                    self.model_size,
+                    device="cuda",
+                    compute_type="float32",
+                )
+            except (OSError, RuntimeError) as e:
+                logger.warning(f"Whisper GPU initialization failed ({e}); falling back to CPU.")
+                self.model = WhisperModel(
+                    self.model_size,
+                    device="cpu",
+                    compute_type="int8",
+                )
             microphone, speaker_name = self._loopback_microphone(soundcard)
             logger.info(
                 f"Capturing shared meeting playback from '{speaker_name}' "

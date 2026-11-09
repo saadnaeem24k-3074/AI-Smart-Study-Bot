@@ -72,6 +72,8 @@ class AttendanceBot:
                 logger.warning(f"Leave error: {e}")
         else:
             logger.info("No active meeting.")
+        if session:
+            await session.finalize_notes()
 
 
 def main():

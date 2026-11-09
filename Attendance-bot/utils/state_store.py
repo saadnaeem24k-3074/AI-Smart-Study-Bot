@@ -21,9 +21,19 @@ class StateStore:
 
     def set_current_class(self, cls: Dict):
         self._state["current_class"] = cls
-        self._state["status"] = "in_class"
+        self._state["status"] = "joining"
         self._state["session_start"] = datetime.now().isoformat()
         self._state["attendance_marked"] = False
+        self._state["last_caption"] = ""
+        self._state["slide_count"] = 0
+        self._state["alerts"] = []
+        self._save()
+
+    def mark_joined(self):
+        self.set_status("in_class")
+
+    def set_status(self, status: str):
+        self._state["status"] = status
         self._save()
 
     def mark_attendance(self):
@@ -33,6 +43,10 @@ class StateStore:
     def set_idle(self):
         self._state["status"] = "idle"
         self._state["current_class"] = None
+        self._state["session_start"] = None
+        self._state["attendance_marked"] = False
+        self._state["last_caption"] = ""
+        self._state["slide_count"] = 0
         self._save()
 
     def add_alert(self, kind: str, subject: str, text: str):

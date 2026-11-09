@@ -126,6 +126,37 @@ def api_settings():
     return jsonify(ok=True)
 
 
+@app.post("/api/ai/test")
+def api_test_ai():
+    body = _body()
+    provider = str(body.get("provider") or "").strip()
+    if provider not in config_store.PROVIDERS:
+        raise ValueError("Choose a supported AI provider.")
+    config = config_store.load_raw()
+    key = str(body.get("api_key") or "").strip() or config_store.ai_key(config, provider)
+    if not key:
+        return jsonify(error="Enter an API key or save one before testing the connection."), 400
+    model = str(body.get("model") or "").strip() or config_store.PROVIDERS[provider]["model"]
+    test_config = {
+        **config,
+        "ai": {
+            "provider": provider,
+            "keys": {provider: key},
+            "models": {provider: model},
+        },
+    }
+    result = ai_notes._call(
+        test_config,
+        "Reply with only the word OK.",
+        32,
+        system="You are testing an AI provider connection. Reply only with OK.",
+        api_key_override=key,
+    )
+    if not result:
+        return jsonify(error="The provider did not return a response. Check the key and model, then try again."), 502
+    return jsonify(ok=True)
+
+
 # ───────────────────────── notes ─────────────────────────
 @app.get("/api/notes")
 def api_notes():
@@ -193,9 +224,11 @@ def notes_chat(folder):
     if not ai_notes.api_key(config):
         return jsonify(error="Add an AI provider key in Dashboard → Settings to use the study chat."), 503
     transcript_path = directory / "transcript.md"
-    if not transcript_path.is_file():
-        abort(404)
-    context = transcript_path.read_text(encoding="utf-8")
+    context = (
+        transcript_path.read_text(encoding="utf-8")
+        if transcript_path.is_file()
+        else ""
+    )
     corrected_path = directory / "transcript_corrected.md"
     if corrected_path.is_file():
         notes = context.split("## Flagged moments", 1)[0].split("## Transcript", 1)[0].strip()
@@ -207,8 +240,6 @@ def notes_chat(folder):
                 corrected_body[-1].strip() if len(corrected_body) == 2 else corrected,
             ) if part
         )
-    if len(context.strip()) < 10:
-        return jsonify(error="There is not enough saved lecture material to answer questions."), 422
     answer = ai_notes.answer_question(config, context, question, history)
     if answer is None:
         return jsonify(error="The AI provider could not answer right now. Check its key and try again."), 502

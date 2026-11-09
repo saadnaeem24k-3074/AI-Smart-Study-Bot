@@ -1,91 +1,114 @@
-"""PDF viewer and lecture-grounded study chat page."""
+"""PDF viewer and study chat using lecture context plus general knowledge."""
 
 import html
 import json
 
-
-def render(folder: str, subject: str, document: str) -> str:
-    folder_json = json.dumps(folder).replace("<", "\\u003c")
-    document_json = json.dumps(document).replace("<", "\\u003c")
-    return f"""<!doctype html>
-<html lang="en">
+_TEMPLATE = r"""<!doctype html>
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(subject)} — Study notes</title>
+<meta name="color-scheme" content="light dark">
+<title>__SUBJECT__ — Study notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-:root {{ color-scheme:dark; --bg:#090b12; --panel:#10131d; --line:#242a39; --muted:#a4adc0; --text:#edf1fa; --accent:#a78bfa; --user:#332968 }}
-* {{ box-sizing:border-box }} body {{ margin:0; background:var(--bg); color:var(--text); font:15px/1.55 'Segoe UI',system-ui,sans-serif }}
-header {{ height:60px; display:flex; align-items:center; gap:16px; padding:0 20px; border-bottom:1px solid var(--line); background:#0d0f17 }}
-a {{ color:#a5d8ff; text-decoration:none }} a:hover {{ text-decoration:underline }}
-.title {{ font-weight:750; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }} .grow {{ flex:1 }}
-main {{ display:grid; grid-template-columns:minmax(0,1.35fr) minmax(360px,.8fr); height:calc(100vh - 60px) }}
-iframe {{ width:100%; height:100%; border:0; background:#fff }}
-aside {{ display:flex; min-width:0; min-height:0; flex-direction:column; border-left:1px solid var(--line); background:var(--panel) }}
-.intro {{ padding:16px 20px 8px; color:var(--muted); font-size:13px }}
-.chips {{ display:flex; gap:7px; overflow-x:auto; padding:11px 16px 8px; border-top:1px solid var(--line) }}
-button {{ font:inherit; cursor:pointer }}
-.chip {{ flex:none; color:#d8d1ff; background:#211d32; border:1px solid #3a3154; border-radius:999px; padding:6px 11px; font-size:12px }}
-.chip:hover {{ background:#302649 }}
-#messages {{ flex:1; min-height:0; overflow:auto; padding:18px 16px 24px; scroll-behavior:smooth }}
-.welcome {{ max-width:440px; margin:24px auto; padding:22px; border:1px solid var(--line); border-radius:18px; background:#151925 }}
-.welcome h2 {{ margin:0 0 6px; font-size:19px }} .welcome p {{ margin:0 0 16px; color:var(--muted); font-size:13px }}
-.suggestions {{ display:grid; gap:8px }}
-.suggestion {{ text-align:left; color:#dbe5f6; border:1px solid #30394b; background:#10141e; border-radius:10px; padding:9px 11px }}
-.suggestion:hover {{ border-color:#8270c8 }}
-.message {{ display:flex; align-items:flex-start; gap:9px; max-width:820px; margin:0 auto 18px }}
-.message.user {{ justify-content:flex-end }}
-.avatar {{ flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; color:#eee8ff; background:#342858; font-size:14px }}
-.bubble {{ max-width:min(88%,640px); padding:12px 15px; border-radius:16px; overflow-wrap:anywhere }}
-.user .bubble {{ background:var(--user); border:1px solid #51438a; border-top-right-radius:5px }}
-.assistant .bubble {{ background:#191e2a; border:1px solid #2d3545; border-top-left-radius:5px }}
-.answer {{ line-height:1.7 }} .answer > :first-child {{ margin-top:0 }} .answer > :last-child {{ margin-bottom:0 }}
-.answer h1,.answer h2,.answer h3 {{ margin:15px 0 7px; color:#f4f1ff; line-height:1.35 }}
-.answer h1 {{ font-size:19px }} .answer h2 {{ font-size:17px }} .answer h3 {{ font-size:15px }}
-.answer p {{ margin:7px 0 }} .answer ul,.answer ol {{ margin:7px 0; padding-left:23px }} .answer li {{ margin:3px 0 }}
-.answer strong {{ color:#fff; font-weight:750 }} .answer code {{ padding:2px 5px; border-radius:5px; background:#0c1018; color:#c4b5fd; font-family:Consolas,monospace }}
-.answer pre {{ overflow:auto; padding:11px; border-radius:8px; background:#0b0f16 }}
-.answer pre code {{ padding:0; background:none; color:#e2e8f0 }}
-.answer table {{ width:100%; border-collapse:collapse; margin:9px 0; font-size:13px }}
-.answer th,.answer td {{ text-align:left; vertical-align:top; border:1px solid #3a4354; padding:6px 8px }}
-.answer th {{ background:#242a38 }} .answer blockquote {{ margin:8px 0; padding-left:12px; border-left:3px solid var(--accent); color:#c4cad8 }}
-.citation {{ display:inline-block; margin:0 2px; padding:0 5px; border-radius:5px; background:#253249; color:#b9dcff; font-size:11px; white-space:nowrap }}
-.actions {{ display:flex; gap:5px; margin-top:9px }}
-.action {{ border:1px solid transparent; background:transparent; color:#aab3c6; border-radius:7px; padding:3px 7px; font-size:12px }}
-.action:hover,.action[aria-pressed="true"] {{ color:#ede9fe; background:#29253a; border-color:#484064 }}
-.loading {{ display:flex; gap:5px; padding:5px 2px }}
-.loading i {{ width:7px; height:7px; border-radius:50%; background:#b8a5ff; animation:pulse 1s infinite alternate }}
-.loading i:nth-child(2) {{ animation-delay:.2s }} .loading i:nth-child(3) {{ animation-delay:.4s }}
-@keyframes pulse {{ to {{ opacity:.25; transform:translateY(-3px) }} }}
-.error {{ color:#fca5a5; padding:0 18px; min-height:4px }}
-form {{ padding:9px 14px 14px; border-top:1px solid var(--line); background:#0e1119 }}
-.composer {{ display:flex; align-items:flex-end; gap:9px; max-width:820px; margin:auto; padding:8px; border:1px solid #394254; border-radius:14px; background:#171b26 }}
-textarea {{ flex:1; resize:none; min-height:42px; max-height:140px; border:0; outline:0; padding:9px; background:transparent; color:var(--text); font:inherit; line-height:1.5 }}
-.send {{ flex:none; display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:11px; color:white; background:#7357d5; font-size:22px }}
-.send:hover {{ background:#8569e8 }} .send:disabled {{ opacity:.55; cursor:wait }}
-.hint {{ max-width:820px; margin:6px auto 0; color:#8993a7; font-size:11px }}
-@media(max-width:800px) {{ main {{ grid-template-columns:1fr; grid-template-rows:42vh minmax(420px,1fr); height:auto; min-height:calc(100vh - 60px) }} aside {{ border-left:0; border-top:1px solid var(--line); min-height:520px }} }}
+:root{--bg:#f3f4f6;--panel:#fff;--sunk:#eceef2;--line:#dde1e8;--ink:#14181f;--mute:#586170;--acc:#2447d6;--mark:#ffe14d;--bad:#c0392b;--e:cubic-bezier(.2,.7,.2,1);color-scheme:light}
+[data-theme=dark]{--bg:#0e1116;--panel:#161a21;--sunk:#1d222b;--line:#272d38;--ink:#e9ecf2;--mute:#9aa3b2;--acc:#8ba6ff;--mark:#6b5a0f;--bad:#ff8a7a;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Hanken Grotesk","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
+button,textarea{font:inherit;color:inherit}button{cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+header{display:flex;align-items:center;gap:14px;height:60px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+header a{display:inline-flex;align-items:center;gap:6px;color:var(--mute);font-weight:600;text-decoration:none;transition:color .2s}
+header a:hover{color:var(--ink)}
+.title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700;letter-spacing:-.01em}
+.icb{display:inline-grid;place-items:center;width:36px;height:36px;border:1px solid var(--line);border-radius:9px;background:var(--panel);transition:background .2s,transform .12s}
+.icb:hover{background:var(--sunk)}.icb:active{transform:scale(.92)}
+main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(360px,.85fr);height:calc(100vh - 60px)}
+iframe{width:100%;height:100%;border:0;background:#fff}
+aside{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:1px solid var(--line);background:var(--panel)}
+.intro{padding:16px 20px;border-bottom:1px solid var(--line)}.intro b{display:block;font-size:16px}.intro span{color:var(--mute);font-size:13px}
+#messages{flex:1;min-height:0;overflow:auto;padding:20px 18px;scroll-behavior:smooth}
+.welcome{max-width:440px;margin:12px auto}.welcome h2{margin:0 0 4px;font-size:22px;letter-spacing:-.02em}.welcome p{margin:0 0 16px;color:var(--mute)}
+.sg{display:grid;gap:8px}
+.sg button{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--panel);text-align:left;font-weight:600;transition:border-color .2s,background .2s,transform .15s var(--e)}
+.sg button:hover{border-color:var(--acc);background:var(--sunk);transform:translateX(3px)}.sg .ic{color:var(--mute)}
+.msg{display:flex;margin:0 auto 22px;max-width:760px;animation:in .35s var(--e)}
+@keyframes in{from{opacity:0;transform:translateY(8px)}}
+.msg.user{justify-content:flex-end}
+.msg.user .bubble{max-width:85%;padding:10px 15px;border-radius:16px 16px 4px 16px;background:var(--ink);color:var(--bg);overflow-wrap:anywhere}
+.msg.assistant{gap:12px}
+.av{display:grid;place-items:center;flex:none;width:30px;height:30px;margin-top:2px;border-radius:9px;background:var(--mark);color:var(--ink)}
+.msg.assistant .bubble{flex:1;min-width:0;overflow-wrap:anywhere}
+.answer{line-height:1.7}.answer>:first-child{margin-top:0}.answer>:last-child{margin-bottom:0}
+.answer h1,.answer h2,.answer h3{margin:16px 0 6px;line-height:1.3;letter-spacing:-.01em}
+.answer h1{font-size:19px}.answer h2{font-size:17px}.answer h3{font-size:15px}
+.answer p{margin:8px 0}.answer ul,.answer ol{margin:8px 0;padding-left:22px}.answer li{margin:4px 0}.answer li::marker{color:var(--acc)}
+.answer code{padding:2px 6px;border-radius:5px;background:var(--sunk);font-family:"IBM Plex Mono",Consolas,monospace;font-size:13px}
+.answer pre{overflow:auto;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--sunk)}.answer pre code{padding:0;background:none}
+.answer table{display:block;overflow:auto;border-collapse:collapse;margin:10px 0;font-size:14px}
+.answer th,.answer td{padding:7px 11px;border:1px solid var(--line);text-align:left;vertical-align:top}.answer th{background:var(--sunk)}
+.answer blockquote{margin:10px 0;padding:2px 0 2px 14px;border-left:3px solid var(--mark);color:var(--mute)}
+.answer a{color:var(--acc)}
+.cite{display:inline-block;margin:0 2px;padding:0 6px;border-radius:5px;background:var(--sunk);color:var(--acc);font:500 12px "IBM Plex Mono",Consolas,monospace}
+.acts{display:flex;gap:4px;margin-top:8px}
+.act{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:0;border-radius:7px;background:none;color:var(--mute);font-size:13px;transition:background .2s,color .2s}
+.act:hover,.act[aria-pressed=true]{background:var(--sunk);color:var(--ink)}
+.dots{display:flex;gap:5px;padding:10px 2px}.dots i{width:7px;height:7px;border-radius:50%;background:var(--mute);animation:hop 1s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes hop{0%,60%,100%{transform:none;opacity:.4}30%{transform:translateY(-5px);opacity:1}}
+.err{min-height:0;padding:0 20px;color:var(--bad);font-size:14px}.err:not(:empty){padding:8px 20px;animation:in .3s var(--e)}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:10px 18px 4px}
+.chip{flex:none;padding:6px 12px;border:1px solid var(--line);border-radius:99px;background:var(--panel);font-size:13px;font-weight:600;transition:background .2s,border-color .2s,transform .12s}
+.chip:hover{background:var(--sunk);border-color:var(--mute)}.chip:active{transform:scale(.95)}
+form{padding:8px 16px 14px}
+.composer{display:flex;align-items:flex-end;gap:8px;max-width:760px;margin:auto;padding:8px;border:1px solid var(--line);border-radius:14px;background:var(--panel);transition:border-color .2s}
+.composer:focus-within{border-color:var(--acc)}
+textarea{flex:1;min-height:40px;max-height:140px;padding:9px;border:0;outline:0;resize:none;background:none;line-height:1.5}
+textarea::placeholder{color:var(--mute)}
+.send{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:10px;background:var(--ink);color:var(--bg);transition:transform .12s,opacity .2s}
+.send:hover{opacity:.88}.send:active{transform:scale(.92)}.send:disabled{opacity:.4;cursor:wait}
+.hint{max-width:760px;margin:6px auto 0;color:var(--mute);font-size:12px}
+@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:42vh minmax(480px,1fr);height:auto;min-height:calc(100vh - 60px)}aside{border-left:0;border-top:1px solid var(--line)}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
-<header><a href="/">← Dashboard</a><span class="title">{html.escape(subject)}</span><span class="grow"></span><a id="openFile" target="_blank" rel="noopener">Open file ↗</a></header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14A8 8 0 019.5 4 8 8 0 1020 14z"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h11v11H9zM5 15V4h11"/></symbol>
+<symbol id="i-chk" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+<symbol id="i-up2" viewBox="0 0 24 24"><path d="M7 11v9H4v-9zM7 11l4-8c2 0 3 1 3 3v3h6l-2 9H7"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M7 13V4H4v9zM7 13l4 8c2 0 3-1 3-3v-3h6l-2-9H7"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></symbol>
+</defs></svg>
+<header><a href="/"><svg class="ic"><use href="#i-back"/></svg>Dashboard</a><span class="title">__SUBJECT__</span>
+  <a id="openFile" target="_blank" rel="noopener">Open file<svg class="ic"><use href="#i-ext"/></svg></a>
+  <button class="icb" id="themeBtn" type="button"><svg class="ic"><use id="themeUse" href="#i-moon"/></svg></button></header>
 <main>
-<iframe id="pdf" title="Lecture notes PDF"></iframe>
+<iframe id="pdf" title="Lecture notes"></iframe>
 <aside>
-  <div class="intro">Your lecture study partner · answers grounded in these notes, with citations when available.</div>
+  <div class="intro"><b>Study chat</b><span>Answers use lecture notes when relevant and general knowledge when they are not enough.</span></div>
   <div id="messages" aria-live="polite">
     <div id="welcome" class="welcome">
-      <h2>Let’s study this lecture 📚</h2>
-      <p>Ask a question or pick a starting point:</p>
-      <div class="suggestions">
-        <button class="suggestion" data-prompt="What are the main topics in this lecture?">What topics did we cover?</button>
-        <button class="suggestion" data-prompt="Explain the most important concept simply, with an example.">Explain the most important concept</button>
-        <button class="suggestion" data-prompt="What should I remember for the exam?">What should I remember?</button>
-        <button class="suggestion" data-prompt="Create a 5-question quiz with answers from this lecture.">Quiz me on this lecture</button>
+      <h2>What would you like to review?</h2>
+      <p>Ask anything about this lecture, or start with one of these.</p>
+      <div class="sg">
+        <button data-prompt="What are the main topics in this lecture?">What topics did we cover?<svg class="ic"><use href="#i-arrow"/></svg></button>
+        <button data-prompt="Explain the most important concept simply, with an example.">Explain the most important concept<svg class="ic"><use href="#i-arrow"/></svg></button>
+        <button data-prompt="What should I remember for the exam?">What should I remember for the exam?<svg class="ic"><use href="#i-arrow"/></svg></button>
+        <button data-prompt="Create a 5-question quiz with answers from this lecture.">Quiz me on this lecture<svg class="ic"><use href="#i-arrow"/></svg></button>
       </div>
     </div>
   </div>
-  <div id="error" class="error" role="alert"></div>
+  <div id="error" class="err" role="alert"></div>
   <nav class="chips" aria-label="Quick prompts">
     <button class="chip" data-prompt="Summarize the main ideas from this lecture.">Summarize</button>
     <button class="chip" data-prompt="List the topics covered in this lecture as bullets.">List topics</button>
@@ -94,182 +117,153 @@ textarea {{ flex:1; resize:none; min-height:42px; max-height:140px; border:0; ou
     <button class="chip" data-prompt="List the key terms and define each one.">Key terms</button>
   </nav>
   <form id="form">
-    <div class="composer"><textarea id="question" maxlength="1000" rows="1" placeholder="Ask about this lecture…" aria-label="Your question" required></textarea><button id="send" class="send" type="submit" aria-label="Send message" title="Send">↑</button></div>
-    <div class="hint">Enter to send · Shift+Enter for a new line</div>
+    <div class="composer"><textarea id="question" maxlength="1000" rows="1" placeholder="Ask about this lecture…" aria-label="Your question" required></textarea>
+      <button id="send" class="send" type="submit" aria-label="Send message"><svg class="ic"><use href="#i-up"/></svg></button></div>
+    <div class="hint">Enter to send, Shift+Enter for a new line.</div>
   </form>
 </aside>
 </main>
 <script>
-const folder = {folder_json};
-const documentName = {document_json};
-const fileUrl = "/notes/" + folder.split("/").map(encodeURIComponent).join("/") + "/" + encodeURIComponent(documentName);
-document.getElementById("pdf").src = fileUrl;
-document.getElementById("openFile").href = fileUrl;
-const messages = document.getElementById("messages");
-const form = document.getElementById("form");
-const input = document.getElementById("question");
-const send = document.getElementById("send");
-const error = document.getElementById("error");
-const welcome = document.getElementById("welcome");
+const folder = __FOLDER__;
+const documentName = __DOCUMENT__;
+const base = folder.split("/").map(encodeURIComponent).join("/");
+const fileUrl = "/notes/" + base + "/" + encodeURIComponent(documentName);
+const $ = id => document.getElementById(id);
+$("pdf").src = fileUrl; $("openFile").href = fileUrl;
+const messages = $("messages"), form = $("form"), input = $("question"), send = $("send"), error = $("error");
 const history = [];
-function escapeHtml(text) {{
-  return text.replace(/[&<>"']/g, character => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}})[character]);
-}}
-function inlineMarkdown(text) {{
-  let value = escapeHtml(text);
-  value = value.replace(/`([^`]+)`/g, "<code>$1</code>");
-  value = value.replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
-  value = value.replace(/\\*([^*]+)\\*/g, "<em>$1</em>");
-  value = value.replace(/\\[([^\\]]+)\\]\\((https:\\/\\/[^ )]+)\\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  return value.replace(/\\[(\\d{{2}}:\\d{{2}}(?::\\d{{2}})?)\\]/g, '<span class="citation">[$1]</span>');
-}}
-function renderMarkdown(markdown) {{
-  const lines = markdown.replace(/\\r/g, "").split("\\n");
-  const output = [];
-  let index = 0;
-  while (index < lines.length) {{
-    const line = lines[index];
-    if (!line.trim()) {{ index++; continue; }}
-    if (line.startsWith("```")) {{
-      const block = [];
-      index++;
-      while (index < lines.length && !lines[index].startsWith("```")) block.push(lines[index++]);
-      if (index < lines.length) index++;
-      output.push("<pre><code>" + escapeHtml(block.join("\\n")) + "</code></pre>");
-      continue;
-    }}
-    if (/^\\s*\\|?.+\\|.+\\|?\\s*$/.test(line) && index + 1 < lines.length &&
-        /^\\s*\\|?\\s*:?-{{3,}}:?\\s*(\\|\\s*:?-{{3,}}:?\\s*)+\\|?\\s*$/.test(lines[index + 1])) {{
-      const cells = row => row.trim().replace(/^\\||\\|$/g, "").split("|").map(cell => cell.trim());
-      const headers = cells(line);
-      index += 2;
+const ic = n => '<svg class="ic" aria-hidden="true"><use href="#i-' + n + '"/></svg>';
+
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("attendance-theme", t); } catch (e) {}
+  $("themeUse").setAttribute("href", t === "dark" ? "#i-sun" : "#i-moon");
+  $("themeBtn").setAttribute("aria-label", t === "dark" ? "Switch to light theme" : "Switch to dark theme");
+}
+$("themeBtn").onclick = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+let saved = null; try { saved = localStorage.getItem("attendance-theme"); } catch (e) {}
+setTheme(saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+}
+function inlineMarkdown(text) {
+  let v = escapeHtml(text);
+  v = v.replace(/`([^`]+)`/g, "<code>$1</code>");
+  v = v.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  v = v.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  v = v.replace(/\[([^\]]+)\]\((https:\/\/[^ )]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return v.replace(/\[(\d{2}:\d{2}(?::\d{2})?)\]/g, '<span class="cite">$1</span>');
+}
+function renderMarkdown(markdown) {
+  const lines = markdown.replace(/\r/g, "").split("\n"), out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    if (line.startsWith("```")) {
+      const block = []; i++;
+      while (i < lines.length && !lines[i].startsWith("```")) block.push(lines[i++]);
+      if (i < lines.length) i++;
+      out.push("<pre><code>" + escapeHtml(block.join("\n")) + "</code></pre>"); continue;
+    }
+    if (/^\s*\|?.+\|.+\|?\s*$/.test(line) && i + 1 < lines.length &&
+        /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[i + 1])) {
+      const cells = row => row.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+      const heads = cells(line); i += 2;
       const rows = [];
-      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) rows.push(cells(lines[index++]));
-      output.push("<table><thead><tr>" + headers.map(cell => "<th>" + inlineMarkdown(cell) + "</th>").join("") +
-        "</tr></thead><tbody>" + rows.map(row => "<tr>" + headers.map((_, cell) =>
-          "<td>" + inlineMarkdown(row[cell] || "") + "</td>").join("") + "</tr>").join("") + "</tbody></table>");
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(cells(lines[i++]));
+      out.push("<table><thead><tr>" + heads.map(c => "<th>" + inlineMarkdown(c) + "</th>").join("") + "</tr></thead><tbody>" +
+        rows.map(r => "<tr>" + heads.map((_, k) => "<td>" + inlineMarkdown(r[k] || "") + "</td>").join("") + "</tr>").join("") + "</tbody></table>");
       continue;
-    }}
-    const heading = line.match(/^(#{{1,3}})\\s+(.+)$/);
-    if (heading) {{ const level = heading[1].length; output.push("<h" + level + ">" + inlineMarkdown(heading[2]) + "</h" + level + ">"); index++; continue; }}
-    if (/^\\s*[-*+]\\s+/.test(line)) {{
+    }
+    const h = line.match(/^(#{1,3})\s+(.+)$/);
+    if (h) { out.push("<h" + h[1].length + ">" + inlineMarkdown(h[2]) + "</h" + h[1].length + ">"); i++; continue; }
+    if (/^\s*[-*+]\s+/.test(line)) {
       const items = [];
-      while (index < lines.length && /^\\s*[-*+]\\s+/.test(lines[index])) items.push("<li>" + inlineMarkdown(lines[index++].replace(/^\\s*[-*+]\\s+/, "")) + "</li>");
-      output.push("<ul>" + items.join("") + "</ul>");
-      continue;
-    }}
-    if (/^\\s*\\d+[.)]\\s+/.test(line)) {{
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) items.push("<li>" + inlineMarkdown(lines[i++].replace(/^\s*[-*+]\s+/, "")) + "</li>");
+      out.push("<ul>" + items.join("") + "</ul>"); continue;
+    }
+    if (/^\s*\d+[.)]\s+/.test(line)) {
       const items = [];
-      while (index < lines.length && /^\\s*\\d+[.)]\\s+/.test(lines[index])) items.push("<li>" + inlineMarkdown(lines[index++].replace(/^\\s*\\d+[.)]\\s+/, "")) + "</li>");
-      output.push("<ol>" + items.join("") + "</ol>");
-      continue;
-    }}
-    if (/^>\\s?/.test(line)) {{ output.push("<blockquote>" + inlineMarkdown(line.replace(/^>\\s?/, "")) + "</blockquote>"); index++; continue; }}
-    const paragraph = [line.trim()];
-    index++;
-    while (index < lines.length && lines[index].trim() &&
-      !/^(#{1,3})\\s|^```|^\\s*[-*+]\\s+|^\\s*\\d+[.)]\\s+|^>\\s?/.test(lines[index])) paragraph.push(lines[index++].trim());
-    output.push("<p>" + inlineMarkdown(paragraph.join(" ")) + "</p>");
-  }}
-  return output.join("");
-}}
-function scrollToLatest() {{ messages.scrollTop = messages.scrollHeight; }}
-function addMessage(role, content) {{
-  if (welcome) welcome.remove();
-  const row = document.createElement("div");
-  row.className = "message " + role;
-  if (role === "assistant") {{
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = "✦";
-    avatar.setAttribute("aria-label", "Study assistant");
-    row.appendChild(avatar);
-  }}
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  if (role === "assistant") {{
-    const answer = document.createElement("div");
-    answer.className = "answer";
-    answer.innerHTML = renderMarkdown(content);
-    bubble.appendChild(answer);
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const copy = document.createElement("button");
-    copy.className = "action";
-    copy.type = "button";
-    copy.textContent = "Copy";
-    copy.setAttribute("aria-label", "Copy answer");
-    copy.addEventListener("click", async () => {{
-      try {{ await navigator.clipboard.writeText(content); copy.textContent = "Copied"; }}
-      catch {{ copy.textContent = "Select text to copy"; }}
-    }});
-    actions.appendChild(copy);
-    for (const [label, icon] of [["Helpful", "👍"], ["Not helpful", "👎"]]) {{
-      const reaction = document.createElement("button");
-      reaction.className = "action";
-      reaction.type = "button";
-      reaction.textContent = icon;
-      reaction.title = label;
-      reaction.setAttribute("aria-label", label);
-      reaction.setAttribute("aria-pressed", "false");
-      reaction.addEventListener("click", () => {{
-        for (const button of actions.querySelectorAll('[aria-label="Helpful"], [aria-label="Not helpful"]')) button.setAttribute("aria-pressed", "false");
-        reaction.setAttribute("aria-pressed", "true");
-      }});
-      actions.appendChild(reaction);
-    }}
-    bubble.appendChild(actions);
-  }} else {{
-    bubble.textContent = content;
-  }}
-  row.appendChild(bubble);
-  messages.appendChild(row);
-  scrollToLatest();
-}}
-function addLoading() {{
-  const row = document.createElement("div");
-  row.className = "message assistant";
-  row.id = "typing";
-  row.innerHTML = '<div class="avatar" aria-label="Study assistant">✦</div><div class="bubble"><div class="loading" role="status" aria-label="Assistant is thinking"><i></i><i></i><i></i></div></div>';
-  messages.appendChild(row);
-  scrollToLatest();
-}}
-function autoGrow() {{ input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; }}
-async function ask(question) {{
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) items.push("<li>" + inlineMarkdown(lines[i++].replace(/^\s*\d+[.)]\s+/, "")) + "</li>");
+      out.push("<ol>" + items.join("") + "</ol>"); continue;
+    }
+    if (/^>\s?/.test(line)) { out.push("<blockquote>" + inlineMarkdown(line.replace(/^>\s?/, "")) + "</blockquote>"); i++; continue; }
+    const para = [line.trim()]; i++;
+    while (i < lines.length && lines[i].trim() && !/^(#{1,3})\s|^```|^\s*[-*+]\s+|^\s*\d+[.)]\s+|^>\s?/.test(lines[i])) para.push(lines[i++].trim());
+    out.push("<p>" + inlineMarkdown(para.join(" ")) + "</p>");
+  }
+  return out.join("");
+}
+const toEnd = () => { messages.scrollTop = messages.scrollHeight; };
+function addMessage(role, content) {
+  const w = $("welcome"); if (w) w.remove();
+  const row = document.createElement("div"); row.className = "msg " + role;
+  if (role === "assistant") {
+    row.innerHTML = '<div class="av" aria-hidden="true">' + ic("spark") + '</div>';
+    const bubble = document.createElement("div"); bubble.className = "bubble";
+    bubble.innerHTML = '<div class="answer">' + renderMarkdown(content) + '</div><div class="acts"></div>';
+    const acts = bubble.querySelector(".acts");
+    const copy = document.createElement("button"); copy.className = "act"; copy.type = "button"; copy.setAttribute("aria-label", "Copy answer");
+    copy.innerHTML = ic("copy") + "<span>Copy</span>";
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(content); copy.innerHTML = ic("chk") + "<span>Copied</span>"; }
+      catch (e) { copy.querySelector("span").textContent = "Select text to copy"; }
+      setTimeout(() => { copy.innerHTML = ic("copy") + "<span>Copy</span>"; }, 1800);
+    };
+    acts.appendChild(copy);
+    for (const [label, icon] of [["Helpful", "up2"], ["Not helpful", "down"]]) {
+      const b = document.createElement("button"); b.className = "act"; b.type = "button"; b.title = label;
+      b.setAttribute("aria-label", label); b.setAttribute("aria-pressed", "false"); b.innerHTML = ic(icon);
+      b.onclick = () => { acts.querySelectorAll("[aria-pressed]").forEach(x => x.setAttribute("aria-pressed", "false")); b.setAttribute("aria-pressed", "true"); };
+      acts.appendChild(b);
+    }
+    row.appendChild(bubble);
+  } else {
+    const bubble = document.createElement("div"); bubble.className = "bubble"; bubble.textContent = content; row.appendChild(bubble);
+  }
+  messages.appendChild(row); toEnd();
+}
+function addLoading() {
+  const row = document.createElement("div"); row.className = "msg assistant"; row.id = "typing";
+  row.innerHTML = '<div class="av" aria-hidden="true">' + ic("spark") + '</div><div class="bubble"><div class="dots" role="status" aria-label="Thinking"><i></i><i></i><i></i></div></div>';
+  messages.appendChild(row); toEnd();
+}
+function autoGrow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; }
+async function ask(question) {
   question = question.trim();
   if (!question || send.disabled) return;
-  input.value = "";
-  autoGrow();
-  error.textContent = "";
-  addMessage("user", question);
-  send.disabled = true;
-  addLoading();
-  try {{
-    const response = await fetch("/api/notes/" + folder.split("/").map(encodeURIComponent).join("/") + "/chat", {{
-      method:"POST", headers:{{"Content-Type":"application/json"}},
-      body:JSON.stringify({{question, history:history.slice(-6)}})
-    }});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not get an answer.");
-    document.getElementById("typing")?.remove();
-    addMessage("assistant", data.answer);
-    history.push({{role:"user", content:question}}, {{role:"assistant", content:data.answer}});
-  }} catch (e) {{
-    document.getElementById("typing")?.remove();
-    error.textContent = e.message || "Could not reach the study assistant.";
-  }} finally {{
-    send.disabled = false;
-    input.focus();
-  }}
-}}
-form.addEventListener("submit", event => {{ event.preventDefault(); ask(input.value); }});
+  input.value = ""; autoGrow(); error.textContent = "";
+  addMessage("user", question); send.disabled = true; addLoading();
+  try {
+    const r = await fetch("/api/notes/" + base + "/chat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question, history: history.slice(-6)})
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Could not get an answer.");
+    $("typing")?.remove(); addMessage("assistant", data.answer);
+    history.push({role: "user", content: question}, {role: "assistant", content: data.answer});
+  } catch (e) {
+    $("typing")?.remove(); error.textContent = e.message || "Could not reach the study assistant. Check that the bot is running.";
+  } finally { send.disabled = false; input.focus(); }
+}
+form.addEventListener("submit", e => { e.preventDefault(); ask(input.value); });
 input.addEventListener("input", autoGrow);
-input.addEventListener("keydown", event => {{
-  if (event.key === "Enter" && !event.shiftKey) {{ event.preventDefault(); form.requestSubmit(); }}
-}});
-document.querySelectorAll("[data-prompt]").forEach(button => button.addEventListener("click", () => {{
-  ask(button.dataset.prompt);
-}}));
+input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+document.querySelectorAll("[data-prompt]").forEach(b => b.addEventListener("click", () => ask(b.dataset.prompt)));
 </script>
 </body>
 </html>"""
+
+
+def render(folder: str, subject: str, document: str) -> str:
+    def js(value: str) -> str:
+        return json.dumps(value).replace("<", "\\u003c")
+
+    return (
+        _TEMPLATE.replace("__SUBJECT__", html.escape(subject))
+        .replace("__FOLDER__", js(folder))
+        .replace("__DOCUMENT__", js(document))
+    )

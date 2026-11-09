@@ -31,7 +31,7 @@ DEFAULT_FEATURES = {
     "ai_summary": True,       # LLM summary at class end (needs API key)
     "called_alert": True,     # sound + popup when your name is called
     "slides": True,           # capture slides + build PDF with notes
-    "whisper_transcription": True,  # local transcription of meeting playback for lecture notes
+    "whisper_transcription": True,  # local transcription of microphone input and meeting playback
     "slide_mode": "auto",     # auto | always | off
     "slide_interval": 4,      # seconds between slide checks
     "keyframe_interval": 30,  # snapshot every N sec while the screen is a video/whiteboard (0 = off)
@@ -46,7 +46,6 @@ PROVIDERS = {
     "deepseek":  {"label": "DeepSeek",           "model": "deepseek-chat",     "env": "DEEPSEEK_API_KEY"},
     "gemini":    {"label": "Google Gemini",      "model": "gemini-2.5-flash",  "env": "GEMINI_API_KEY"},
 }
-MIN_PARTICIPANTS_DEFAULT = 6
 CAPTION_LANGS = ("urdu", "english", "keep")
 NOTES_LANGS = ("English", "Urdu", "Roman Urdu")
 
@@ -128,13 +127,6 @@ def ai_model(cfg: Dict, provider: Optional[str] = None) -> str:
     return (ai["models"].get(prov) or PROVIDERS[prov]["model"]).strip()
 
 
-def min_participants(cfg: Dict) -> int:
-    try:
-        return int((cfg.get("global_settings") or {}).get("min_participants", MIN_PARTICIPANTS_DEFAULT))
-    except (TypeError, ValueError):
-        return MIN_PARTICIPANTS_DEFAULT
-
-
 def public_config() -> Dict:
     """Config for the dashboard — never includes the API key itself."""
     cfg = ensure_ids()
@@ -152,7 +144,6 @@ def public_config() -> Dict:
     return {
         "student": cfg.get("student", {}),
         "classes": classes,
-        "settings": {"min_participants": min_participants(cfg)},
         "features": get_features(cfg),
         "ai": {"provider": ai["provider"], "providers": providers},
     }
@@ -174,13 +165,6 @@ def update_settings(data: Dict) -> None:
                 if isinstance(names, str):
                     names = names.splitlines()
                 cur["urdu_names"] = [n.strip() for n in names if n and n.strip()]
-
-        s = data.get("settings")
-        if isinstance(s, dict) and "min_participants" in s:
-            mp = int(s["min_participants"])
-            if not 0 <= mp <= 500:
-                raise ValueError("Minimum participants must be 0–500")
-            cfg.setdefault("global_settings", {})["min_participants"] = mp
 
         ft = data.get("features")
         if isinstance(ft, dict):

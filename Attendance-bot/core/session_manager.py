@@ -35,6 +35,39 @@ class SessionManager:
         self.att_logger  = AttendanceLogger()
         self.tg          = TelegramNotifier(config)
         self.current_handler = None
+        self.current_recorder = None
+        self._notes_task = None
+
+    async def finalize_notes(self):
+        """Finish the active session's notes once, even if shutdown also triggers cleanup."""
+        if self.current_recorder is None:
+            self.state.set_idle()
+            return
+        task = self.start_notes_finalization()
+        await asyncio.shield(task)
+
+    def start_notes_finalization(self):
+        """Start finalizing immediately after leaving, without blocking status updates."""
+        if self.current_recorder is None:
+            self.state.set_idle()
+            return None
+        if not self.current_recorder.enabled:
+            self.state.set_idle()
+            return None
+        if self._notes_task is None:
+            self.state.set_status("generating_notes")
+            self._notes_task = asyncio.create_task(self._finalize_notes(self.current_recorder))
+        return self._notes_task
+
+    async def _finalize_notes(self, recorder):
+        try:
+            done = await asyncio.wait_for(recorder.finalize(), timeout=600)
+            if done:
+                self.state.update("last_notes", str(done))
+        except Exception as e:
+            logger.error(f"[{recorder.subject}] Could not finish notes: {e}")
+        finally:
+            self.state.set_idle()
 
     async def attend(self, cls: Dict, is_last: bool = True):
         platform = cls["platform"]
@@ -66,11 +99,10 @@ class SessionManager:
 
         # Lecture notes + slides (Meet only — Zoom has no captions to read)
         recorder = NotesRecorder(cls, self.config) if platform == "meet" else None
+        self.current_recorder = recorder
         if recorder is not None and hasattr(handler, "attach_recorder"):
             handler.attach_recorder(recorder)
             self.state.update("notes_dir", str(recorder.dir) if recorder.enabled else "")
-            self.state.update("slide_count", 0)
-            self.state.update("alerts", [])
         session_start = time.time()
         joined = False
 
@@ -92,8 +124,9 @@ class SessionManager:
                 if "No link" in err or "skipping" in err.lower():
                     logger.warning(f"[{subject}] {err} — skipping class.")
                     self.current_handler = None
+                    self.state.set_idle()
                     if recorder is not None:
-                        await recorder.finalize()   # removes the empty folder
+                        await self.finalize_notes()
                     return
                 logger.warning(f"[{subject}] Join attempt {attempt} failed: {err}")
                 remaining = (join_deadline - datetime.now(PKT)).total_seconds()
@@ -110,42 +143,43 @@ class SessionManager:
             self.tg.error(cls, "Could not join within 20 min")
             self.att_logger.log_failure(cls, "Join timeout")
             self.current_handler = None
+            self.state.set_idle()
             if recorder is not None:
-                await recorder.finalize()   # removes the empty folder
+                await self.finalize_notes()
             return
+
+        self.state.mark_joined()
 
         # ── Monitor + Rejoin phase ──────────────────────────
         try:
             await self._monitor_with_rejoin(handler, cls, hard_end)
         except Exception as e:
-            logger.error(f"[{subject}] Session error: {e}")
+            logger.exception(f"[{subject}] Session error: {e}")
             self.tg.error(cls, str(e))
         finally:
             duration_secs = int(time.time() - session_start)
             try:
                 await handler.leave()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[{subject}] Could not leave meeting cleanly: {e}")
             self.current_handler = None
+            notes_task = self.start_notes_finalization()
+            if notes_task is not None:
+                await asyncio.sleep(0)
             self.tg.left(cls, "end_time")
             self.tg.class_summary(cls, self.state.get("attendance_marked"), duration_secs)
             self.att_logger.log_session(cls, marked=bool(self.state.get("attendance_marked")))
-            if recorder is not None:
-                try:
-                    done = await asyncio.wait_for(recorder.finalize(), timeout=600)
-                    if done:
-                        self.state.update("last_notes", str(done))
-                except Exception as e:
-                    logger.error(f"[{subject}] Could not finish notes: {e}")
+            if notes_task is not None:
+                await asyncio.shield(notes_task)
             logger.info(f"[{subject}] Session ended.")
 
     async def _monitor_with_rejoin(self, handler, cls: Dict, hard_end: datetime):
         """
-        Leave ONLY when one of these 3 conditions is met:
+        Leave ONLY when one of these conditions is met:
         1. scheduled_end + 5min reached (hard_end)
         2. Host ended the meeting for everyone
-        3. Participant count < min_participants (Dashboard → Settings) for 2 minutes
-        Nothing else causes a leave.
+        A low participant count is not treated as a meeting end: teachers may stay
+        alone while preparing the class, and participants can leave temporarily.
         """
         platform = cls["platform"]
         subject  = cls["subject"]

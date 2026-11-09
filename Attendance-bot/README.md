@@ -13,21 +13,26 @@ Windows 11 · Local Machine · NVIDIA GPU Supported
 | **Overview** | live status, current class, slides captured, alerts, live caption, attendance history |
 | **Schedule** | paste a meeting link straight into any row of the timetable (press Enter — saves instantly, the bot reloads by itself); add / edit / delete classes; **Quick join** = join any meeting link right now |
 | **Notes** | every Meet class's transcript, AI summary and slides PDF |
-| **Settings** | your name / roll no / name spellings, "leave if fewer than N people", feature switches, AI provider + key |
+| **Settings** | your name / roll no / name spellings, feature switches, AI provider + key |
+
+The dashboard has a responsive light/dark theme, searchable class history and notes, grouped weekly schedule, and editable feature settings. Its live caption is sourced from Meet; optional local Whisper transcription supplements it and cannot guarantee a complete or error-free transcript.
 
 **New features**
-- **Lecture notes (always)** — every Meet class gets `notes/<Subject>/<date_time>/` with `transcript.md` and **`notes.pdf`** (+ `notes.html`). The PDF is built even for talk-only lectures and even with **no API key**:
-  - **Cover:** stats, a colour timeline of how long each slide was on screen, and a deduplicated **Key moments** radar containing only complete, meaningful flagged sentences. Flag counts match the moments shown.
+- **Lecture notes (always)** — as soon as the bot leaves a Meet, it starts finalizing that class's notes; the dashboard shows **Joining**, **In class**, and **Making notes** status transitions. Every class gets `notes/<Subject>/<date_time>/` with `transcript.md` and **`notes.pdf`** (+ `notes.html`). The PDF is built even for talk-only lectures and even with **no API key**:
+  - **Cover and study notes:** stats, a colour timeline, real flagged quotes with lecture-relative timestamps, separate key takeaways, and study notes flowing directly after the key moments to avoid a mostly empty first page.
   - **At a glance:** a contact sheet of every slide (click to jump).
-  - **Slide notes and a glossary:** screenshots, useful explanations, defined key terms, concrete examples, and numbered procedures. Quiz questions and answers share a page; the footer is page-number-only.
+  - **Visual study notes:** transcript-grounded process flows, category trees, or comparisons when they clarify a topic; section cards, highlighted key ideas, examples, and a two-column key-terms table. Quiz answers sit with their questions, and a quick-reference summary closes the notes.
+  - **Cleaner pages:** consistent spacing, no duplicate step numbers, and a footer with the lecture title and page count.
   - **Full timed transcript** at the end.
-- **Study chat** — open **Notes → Open notes + study chat** in the dashboard to view a class PDF beside a lecture-grounded chatbot. Answers render Markdown with headings, bold terms, lists, tables and timestamp citations when available. Quick prompts, copy/reaction actions, and a loading indicator are included; when available, the AI-corrected transcript is used as chat context.
-- **AI study notes (pick a provider in Dashboard → Settings → AI: Anthropic Claude, DeepSeek or Google Gemini; each key is stored locally in `.env`)** — the transcript is sent to the configured model and transformed into detailed topic explanations, formulas, concrete examples, numbered procedures, a summary, defined key terms, homework/deadlines, and a self-test. Acronyms and technical terms are defined on first use. AI-corrected captions are used for the generated notes, while original and corrected transcripts remain separately available. If AI generation fails, the bot logs the provider error and marks the PDF accordingly.
+- **Study chat** — open **Notes → Open notes + study chat** in the dashboard to view a class PDF beside a study assistant. It uses lecture notes when relevant and answers from general knowledge when the lecture does not cover the question; answers never attribute general knowledge to the teacher. Markdown, timestamps when available, quick prompts, copy/reaction actions, and a loading indicator are included.
+- **AI study notes (pick a provider in Dashboard → Settings → AI: Anthropic Claude, DeepSeek or Google Gemini; each key is stored locally in `.env`)** — the configured provider key also powers transcript-grounded process, concept-map, hierarchy, and comparison diagrams in the PDF; no separate image-generation key is needed. The transcript is transformed into detailed topic explanations, formulas, concrete examples, numbered procedures, a summary, defined key terms, homework/deadlines, and a self-test. Acronyms and technical terms are defined on first use. AI-corrected captions are used for the generated notes, while original and corrected transcripts remain separately available. If AI generation fails, the bot logs the provider error and marks the PDF accordingly.
 - **PDF options (Dashboard → Settings)** — choose concise or detailed notes, A4 or US Letter paper, and whether to append the full transcript. The original full transcript is always saved separately as `transcript.md`.
 - **Smart slide capture** — a new screenshot is taken when the slide changes; near-duplicate images already captured are skipped, and if the teacher reveals bullets one by one the **same slide's screenshot is updated** so you keep the complete version. While the screen is a video / whiteboard / scrolling document it takes a **snapshot every 30 s** (Settings). Each screenshot page includes a topic takeaway and teacher-explanation bullets from AI or the captured captions. Don't minimise the bot's Chrome window — minimised windows give blank screenshots. If a presentation isn't detected, set *Slide capture mode* to **always**.
 - **Caption language** — Meet captions one language at a time. Default is Urdu (it also writes English words phonetically, which the detector understands). Choose **English** or *Keep Meet's own* in Settings, or per class in Schedule → Edit → *Captions language*. For an English YouTube lecture, choose **English**.
 - **Video transcripts** — the bot records Google Meet's visible live captions; it does not fetch YouTube's own subtitle/transcript track. When a teacher plays a video, they must share the tab/screen with audio enabled and Meet captions must be on in a matching language. The bot warns in the log if captions have not appeared after 30 seconds.
-- **Local video transcription** — Notes → Settings → Features enables the free `faster-whisper` base model, which listens to meeting playback through Windows WASAPI loopback, detects the spoken language, and adds speech missing from Meet captions to the lecture transcript. It runs locally (no account or API key); its model downloads once on first use. When compatible NVIDIA CUDA libraries are installed it uses the GPU, otherwise it logs a warning and falls back to CPU. For this older NVIDIA GPU (compute capability 5.0), the supported setup is CUDA 11/cuDNN 8.9.7 with CTranslate2 3.24.0. Download the `cuBLAS.and.cuDNN_CUDA11_win_v4.7z` libraries archive from [Purfview's faster-whisper Windows library release](https://github.com/Purfview/whisper-standalone-win/releases/tag/libs) and extract its DLLs into `venv\Scripts`; setup pins CTranslate2 to the compatible version. It needs the meeting audio unmuted and audible on the default Windows output. Loopback captures all audio rendered by that output device during class, not just Meet; it is kept locally. Meet captions still drive attendance detection, and duplicate recent caption text is filtered from the notes.
+- **Local audio transcription** — Notes → Settings → Features enables the free `faster-whisper` base model, which listens to the default Windows microphone and speaker playback locally, detects the spoken language, and can add speech missed by Meet captions to lecture notes. Microphone capture first uses WASAPI and falls back to PyAudio if the selected input cannot be opened there. Short overlapping chunks reduce gaps; voice-activity and confidence filters reject silence, low-confidence segments, and common video-outro hallucinations. The model downloads once on first use; compatible NVIDIA CUDA libraries enable GPU use, otherwise it falls back to CPU. The default microphone must be selected and permitted in Windows privacy settings. Playback loopback captures all audio rendered by the default output device during class, not just Meet.
+- **Live question answers** — Questions spoken in the meeting that address your name or roll number, and questions posted in chat with your name or roll number, are answered in meeting chat. Lecture content is used when relevant; the configured AI provider's general knowledge is used when the lecture does not cover the question. Questions spoken into your local microphone are routed through the same answer behavior. An AI provider key is required.
+- **Meeting lifecycle** — The bot leaves when Meet reports the meeting has ended or the scheduled end time is reached. A low participant count no longer triggers an automatic leave, since people can leave temporarily or the teacher may be alone before class.
 - **Transcript cleanup** — Meet remains the source of the transcript, so its live-caption errors cannot be recovered if Meet never recognized the words. With AI enabled, the bot now conservatively proofreads each captured caption segment, keeps the original `transcript.md`, and saves a separate `transcript_corrected.md`; uncertain corrections should be checked against the original/audio. Caption polling runs once per second and ignores common Meet/chat UI text.
 - **"You were called" alert** — beeps + an always-on-top popup when your name or roll number is said, even outside roll call.
 - **Chat fix** — the bot re-opens the chat panel before sending (caption settings used to hide it), retries a failed "Present" up to 5 times, only marks you present if it was really sent, and pops a loud alert if it gave up so you can type it yourself. A proof screenshot of each sent message goes to `screenshots/`.
@@ -180,9 +185,8 @@ Enable Live Captions
 Monitor Loop (every 2 seconds):
     ├── Read captions from DOM
     ├── Read chat messages
-    ├── Run Burst Detector (5+ "present" in 3s)
-    ├── Run Attendance Detector (teacher phrases)
-    └── Send "Present" or "Mic kharab hai" as needed
+    ├── Send "Present Sir" only for "attendance" or roll number 24K-3074
+    └── Answer questions addressed to Saad using lecture captions and the configured AI provider
     ↓
 End Condition:
     ├── Host ends meeting → leave
@@ -194,15 +198,12 @@ End Condition:
 ```
 Caption text analyzed every 2 seconds:
 
-IF burst (5+ "present" in chat within 3s):
-    → Check captions for name/roll
-    → If found: send "Present"
+IF captions contain "attendance" (including supported Urdu variants) or the full roll number:
+    → send "Present Sir" once
 
-IF teacher says attendance phrase:
-    + Name/roll in captions:
-        → send "Present"
-    + Only first name, question context:
-        → send "Mic kharab hai"
+A name mention by itself sends no message. If a question and Saad's name occur together,
+or a question is followed by a request for Saad to answer, answer from the lecture captions
+in meeting chat using the configured AI provider key.
 
 Teacher phrases detected (Urdu + English):
   - "main attendance mark kar raha hun"

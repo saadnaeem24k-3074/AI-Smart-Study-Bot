@@ -11,7 +11,7 @@ Setup:
 
 Events notified:
   🟢 Joined class
-  ✅ Attendance marked (Present sent)
+  ✅ Attendance marked (Present Sir sent)
   🔵 Burst detected (mass Present in chat)
   📢 Roll call — name detected in captions
   🔴 Left class
@@ -59,7 +59,7 @@ class TelegramNotifier:
         )
 
     def attendance_marked(self, cls: Dict, trigger: str):
-        """Bot sent 'Present' in chat."""
+        """Bot sent 'Present Sir' in chat."""
         now = self._now()
         self._send(
             f"✅ *Attendance Marked!*\n"
@@ -67,7 +67,7 @@ class TelegramNotifier:
             f"📖 Subject: `{cls['subject']}`\n"
             f"🕐 Time: `{now}`\n"
             f"🎯 Trigger: `{trigger}`\n"
-            f"💬 Sent: `Present`"
+            f"💬 Sent: `Present Sir`"
         )
 
     def burst_detected(self, cls: Dict, count: int):

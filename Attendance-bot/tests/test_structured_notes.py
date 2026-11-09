@@ -43,6 +43,42 @@ class PdfSettingsTests(unittest.TestCase):
 
 
 class StructuredNotesTests(unittest.IsolatedAsyncioTestCase):
+    def test_diagrams_are_bounded_and_invalid_types_are_ignored(self):
+        diagrams = ai_notes._normalize_diagrams([
+            {"type": "unknown", "nodes": ["A", "B"]},
+            {"type": "comparison", "groups": [
+                {"label": "A", "items": ["one", "two", "three", "four", "five", "six"]},
+                {"label": "B", "items": ["seven"]},
+            ]},
+        ])
+
+        self.assertEqual(len(diagrams), 1)
+        self.assertEqual(diagrams[0]["type"], "comparison")
+        self.assertEqual(
+            sum(1 + len(group["items"]) for group in diagrams[0]["groups"]),
+            7,
+        )
+
+    def test_diagrams_are_derived_from_supported_steps_or_key_ideas(self):
+        sections = ai_notes._normalize_sections([
+            {
+                "heading": "A process",
+                "steps": ["Measure rise", "Measure run", "Divide"],
+            },
+            {
+                "heading": "Core ideas",
+                "bullets": ["First idea", "Second idea"],
+            },
+        ])
+
+        self.assertEqual(sections[0]["diagrams"][0]["type"], "process")
+        self.assertEqual(
+            sections[0]["diagrams"][0]["nodes"],
+            ["Measure rise", "Measure run", "Divide"],
+        )
+        self.assertEqual(sections[1]["diagrams"][0]["type"], "hierarchy")
+        self.assertEqual(sections[1]["diagrams"][0]["root"], "Core ideas")
+
     @patch("utils.ai_notes._call")
     async def test_generates_and_normalizes_structured_notes(self, call):
         call.return_value = json.dumps({
@@ -53,6 +89,11 @@ class StructuredNotesTests(unittest.IsolatedAsyncioTestCase):
                 "key_idea": "Slope is rise over run.",
                 "bullets": ["Compare the vertical and horizontal changes."],
                 "steps": ["Measure the vertical change.", "Measure the horizontal change."],
+                "diagrams": [{
+                    "type": "process",
+                    "title": "Find the slope",
+                    "nodes": ["Measure rise", "Measure run", "Divide rise by run"],
+                }],
                 "equations": ["m = (y2 - y1) / (x2 - x1)"],
                 "examples": ["For (3, 5) and (10, 10), m = 5/7."],
             }],
@@ -69,11 +110,13 @@ class StructuredNotesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(notes["sections"][0]["heading"], "Slope")
         self.assertEqual(notes["sections"][0]["equations"], ["m = (y2 - y1) / (x2 - x1)"])
         self.assertEqual(notes["sections"][0]["steps"], ["Measure the vertical change.", "Measure the horizontal change."])
+        self.assertEqual(notes["sections"][0]["diagrams"][0]["type"], "process")
         self.assertEqual(notes["key_terms"][0]["definition"], "The rate of change of a line.")
         self.assertIn("Do not simply repeat", call.call_args.args[1])
         self.assertIn("explain acronyms and technical jargon at first use", call.call_args.args[1])
         self.assertIn("concrete worked case", call.call_args.args[1])
         self.assertIn("Transcript about slope.", call.call_args.args[1])
+        self.assertIn('"diagrams"', call.call_args.args[1])
         self.assertEqual(call.call_args.args[2], 7000)
 
     @patch("utils.ai_notes._call")
@@ -170,6 +213,27 @@ class StudyNotesPdfTests(unittest.TestCase):
         self.assertNotIn("Full transcript", rendered)
         self.assertNotIn("Raw caption text.", rendered)
 
+    def test_pdf_includes_readable_diagram_cards(self):
+        context = dict(self.context)
+        context["summary"] = {
+            **self.context["summary"],
+            "sections": [{
+                **self.context["summary"]["sections"][0],
+                "diagrams": [{
+                    "type": "process",
+                    "title": "Find the slope",
+                    "nodes": ["Measure rise", "Measure run", "Divide"],
+                }],
+            }],
+        }
+
+        rendered = pdf_builder.build_html(context)
+
+        self.assertIn('<div class="diagram">', rendered)
+        self.assertIn("Find the slope", rendered)
+        self.assertIn("Measure rise", rendered)
+        self.assertIn("linear-gradient(135deg, #f8faff, #f0fdfa)", rendered)
+
     def test_transcript_appendix_can_be_enabled(self):
         rendered = pdf_builder.build_html(self.context, {"include_transcript": True})
 
@@ -240,6 +304,95 @@ class StudyNotesPdfTests(unittest.TestCase):
 
         self.assertIn("<h1 dir=\"auto\">Database, Queries, Indexes</h1>", rendered)
         self.assertNotIn("Quick join", rendered)
+
+    def test_contact_sheet_uses_cover_space_when_no_ai_notes_exist(self):
+        context = {
+            **self.context,
+            "summary": {},
+            "slides": [{
+                "n": 1, "file": "slides/slide_001.jpg", "time": "21:00:00", "kind": "slide",
+                "dur_s": 60, "takeaway": "Slope measures rate of change.",
+                "bullets": [], "summary_source": "Caption notes", "raw": "",
+            }],
+        }
+
+        rendered = pdf_builder.build_html(context)
+
+        cover = rendered.split("</section>", 1)[0]
+        self.assertIn("Lecture at a glance", cover)
+        self.assertIn("slide_001.jpg", cover)
+
+    def test_notes_flow_after_key_moments_with_distinct_quotes_and_takeaways(self):
+        context = {
+            **self.context,
+            "start_time": "09:30:00",
+            "flags": [{
+                "kind": "EXAM", "label": "Exam / paper", "time": "09:38:23",
+                "slide": 0, "text": "Remember the slope formula for the exam.",
+            }],
+            "summary": {
+                **self.context["summary"],
+                "emphasis": [
+                    "Remember the slope formula for the exam.",
+                    "Practice with points that have different coordinates.",
+                ],
+            },
+        }
+
+        rendered = pdf_builder.build_html(context)
+
+        self.assertEqual(rendered.count("1 flagged moment"), 1)
+        self.assertIn("08:23", rendered)
+        self.assertIn("<q>Remember the slope formula for the exam.</q>", rendered)
+        self.assertIn("<h2>Key takeaways</h2>", rendered)
+        self.assertEqual(rendered.count("Remember the slope formula for the exam."), 1)
+        self.assertLess(rendered.index("Key moments"), rendered.index("Organized study notes"))
+        self.assertNotIn("<h4>Steps</h4>", rendered)
+
+    def test_visual_notes_glossary_quiz_and_quick_reference_layout(self):
+        context = {
+            **self.context,
+            "summary": {
+                **self.context["summary"],
+                "sections": [{
+                    **self.context["summary"]["sections"][0],
+                    "heading": "Testing process",
+                    "steps": ["1. Unit Testing", "2. Integration Testing"],
+                    "diagrams": [
+                        {"type": "process", "title": "Testing flow",
+                         "nodes": ["Unit", "Integration", "System"]},
+                        {"type": "comparison", "title": "Test approaches",
+                         "groups": [
+                             {"label": "White box", "items": ["Uses internal structure"]},
+                             {"label": "Black box", "items": ["Uses observable behavior"]},
+                         ]},
+                        {"type": "hierarchy", "title": "Testing categories", "root": "Testing",
+                         "branches": [
+                             {"label": "Functional", "children": ["Unit"]},
+                             {"label": "Non-functional", "children": ["Performance"]},
+                         ]},
+                        {"type": "analogy", "title": "System architecture",
+                         "nodes": ["Engine = core", "Chassis = structure", "Car = complete system"]},
+                    ],
+                }],
+            },
+        }
+
+        rendered = pdf_builder.build_html(context)
+
+        self.assertIn('<div class="flow">', rendered)
+        self.assertIn("Unit</span>", rendered)
+        self.assertNotIn("1. 1. Unit Testing", rendered)
+        self.assertIn('<table class="glossary">', rendered)
+        self.assertIn("<th>Term</th><th>Definition</th>", rendered)
+        self.assertIn("💡 Examples", rendered)
+        self.assertIn("Check your answer:", rendered)
+        self.assertIn("Quick reference", rendered)
+        self.assertIn("White box", rendered)
+        self.assertIn("Black box", rendered)
+        self.assertIn("Testing categories", rendered)
+        self.assertIn("Testing</div>", rendered)
+        self.assertIn("Engine = core", rendered)
 
 
 class FlagQualityTests(unittest.TestCase):
@@ -321,6 +474,46 @@ class CaptionNotesTests(unittest.TestCase):
 
 
 class NotesChatRouteTests(unittest.TestCase):
+    def test_ai_connection_test_uses_provided_key_without_returning_it(self):
+        with patch.object(dashboard_server.config_store, "load_raw", return_value={"features": {}}), \
+             patch.object(dashboard_server.ai_notes, "_call", return_value="OK") as call:
+            response = dashboard_server.app.test_client().post(
+                "/api/ai/test",
+                json={
+                    "provider": "gemini",
+                    "api_key": "temporary-test-key",
+                    "model": "test-model",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"ok": True})
+        self.assertEqual(call.call_args.args[0]["ai"]["keys"]["gemini"], "temporary-test-key")
+        self.assertEqual(call.call_args.args[0]["ai"]["models"]["gemini"], "test-model")
+        self.assertEqual(call.call_args.kwargs["api_key_override"], "temporary-test-key")
+        self.assertNotIn("temporary-test-key", response.get_data(as_text=True))
+
+    def test_ai_connection_test_requires_a_key(self):
+        with patch.object(dashboard_server.config_store, "load_raw", return_value={"features": {}}), \
+             patch.object(dashboard_server.config_store, "ai_key", return_value=""):
+            response = dashboard_server.app.test_client().post(
+                "/api/ai/test", json={"provider": "gemini"}
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("API key", response.json["error"])
+
+    def test_dashboard_contains_responsive_navigation_and_all_tabs(self):
+        page = dashboard_server.app.test_client().get("/").get_data(as_text=True)
+
+        for expected in (
+            'data-tab="overview"', 'data-tab="schedule"', 'data-tab="notes"',
+            'data-tab="settings"', 'id="themeToggle"', 'id="classDialog"',
+            'id="historyFilter"', 'id="notesDate"', 'id="testAIButton"',
+            "prefers-reduced-motion", "missing-link", "aria-current",
+        ):
+            self.assertIn(expected, page)
+
     def test_study_page_and_chat_route_use_saved_notes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "notes"
@@ -360,6 +553,33 @@ class NotesChatRouteTests(unittest.TestCase):
                 self.assertIn("Slope is rise divided by run.", answer.call_args.args[1])
                 self.assertIn("Corrected slope is rise divided by run.", answer.call_args.args[1])
                 self.assertNotIn("Raw caption is rise divided by the run.", answer.call_args.args[1])
+
+    def test_study_chat_can_answer_when_transcript_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "notes"
+            folder = root / "Algebra" / "2026-10-23_20-00"
+            folder.mkdir(parents=True)
+            (folder / "meta.json").write_text(
+                json.dumps({"done": True}), encoding="utf-8"
+            )
+            with (
+                patch.object(dashboard_server, "NOTES_ROOT", root),
+                patch.object(dashboard_server.config_store, "load_raw", return_value={}),
+                patch.object(dashboard_server.ai_notes, "api_key", return_value="configured"),
+                patch.object(
+                    dashboard_server.ai_notes,
+                    "answer_question",
+                    return_value="A database organizes data.",
+                ) as answer,
+            ):
+                response = dashboard_server.app.test_client().post(
+                    "/api/notes/Algebra/2026-10-23_20-00/chat",
+                    json={"question": "What is a database?"},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["answer"], "A database organizes data.")
+        self.assertEqual(answer.call_args.args[1], "")
 
     def test_study_chat_page_has_quick_actions_and_markdown_renderer(self):
         page = dashboard_server.study_page.render("Algebra/2026-10-23_20-00", "Algebra", "notes.pdf")

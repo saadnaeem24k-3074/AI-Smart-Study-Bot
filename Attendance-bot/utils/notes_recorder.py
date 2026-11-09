@@ -327,7 +327,7 @@ class NotesRecorder:
                 )
 
         keywords = lecture_insights.top_keywords(plain)
-        self.lecture_title = pdf_builder._lecture_title({
+        self.lecture_title = pdf_builder.lecture_title({
             "subject": self.subject,
             "summary": summary,
             "keywords": keywords,
@@ -362,6 +362,7 @@ class NotesRecorder:
         ctx = {
             "subject": self.subject, "title": self.lecture_title,
             "date_str": self.started.strftime("%d %B %Y"),
+            "start_time": self.started.strftime("%H:%M:%S"),
             "end_time": ended.strftime("%H:%M:%S"),
             "duration_s": (ended - self.started).total_seconds(),
             "words": sum(len(sg.text.split()) for sg in self.segments),
@@ -382,7 +383,8 @@ class NotesRecorder:
             html_ok = True
             pdf_ok = await pdf_builder.render_pdf(
                 html_path, self.dir / "notes.pdf",
-                self.features.get("pdf_paper_size", "A4"))
+                self.features.get("pdf_paper_size", "A4"),
+                pdf_builder.lecture_title(ctx))
         except Exception as e:
             logger.error(f"[{self.subject}] Could not build the notes document: {e}")
 

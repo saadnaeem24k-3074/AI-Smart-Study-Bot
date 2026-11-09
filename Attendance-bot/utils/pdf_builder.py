@@ -2,9 +2,9 @@
 Lecture-notes document builder (HTML → PDF).
 
 Pages:
-  1  Cover      – lecture title, stats, slide timeline, summary, key moments
+  1  Cover      – lecture title, stats, slide timeline, summary and key moments
   2  At a glance – contact sheet of every slide (click a thumbnail to jump)
-  3… Study notes – slide explanations, defined glossary terms, examples and steps
+  2… Study notes – slide explanations, defined glossary terms, examples and steps
   …  Self-test  – questions and answers together
   …  Transcript – the full timed transcript
 
@@ -42,6 +42,8 @@ h1, h2, h3, p { margin: 0; }
 section.page { break-after: page; break-inside: auto; }
 section.page:last-of-type { break-after: auto; }
 .page > h2, .card h2, .slide .sh { break-after: avoid; }
+.pg { font-size: 18pt !important; margin-bottom: 5px !important; }
+.notes-start { margin-top: 14px; }
 .hero { border-radius: 14px; padding: 22px 24px; color: #fff;
   background: linear-gradient(135deg, #4338ca 0%, #7c3aed 55%, #db2777 120%); }
 .kicker { font-size: 8.5pt; letter-spacing: .18em; opacity: .85; font-weight: 700; }
@@ -52,23 +54,60 @@ section.page:last-of-type { break-after: auto; }
   padding: 3px 11px; font-size: 9pt; font-weight: 600; }
 .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 15px; margin-top: 12px;
   break-inside: avoid; background: #fff; }
-.card h2 { font-size: 10pt; text-transform: uppercase; letter-spacing: .1em; color: #475569; margin-bottom: 7px; }
+.card h2 { font-size: 11pt; text-transform: uppercase; letter-spacing: .1em; color: #475569; margin-bottom: 7px; }
 .card.summary { border-left: 5px solid #6366f1; }
 .card.radar { border-left: 5px solid #e11d48; background: #fff7f8; }
+.card.takeaways { border-left: 5px solid #0891b2; background: #f0f9ff; }
 .card.todo { border-left: 5px solid #2563eb; }
 .card.terms { border-left: 5px solid #10b981; }
 .card.terms h3 { color: #047857; font-size: 12pt; margin-bottom: 7px; }
-.card.lecture { border-left: 5px solid #7c3aed; }
-.card.lecture h3 { font-size: 13pt; color: #312e81; margin-bottom: 6px; }
-.card.lecture h4 { color: #475569; font-size: 9pt; margin: 8px 0 4px; }
-.key-idea { color: #334155; margin-bottom: 7px; }
+.card.lecture { border-left: 5px solid #7c3aed; padding: 14px 17px; margin-top: 14px; }
+.card.lecture h3 { font-size: 15pt; line-height: 1.25; color: #312e81; margin-bottom: 8px; }
+.card.lecture h4 { color: #475569; font-size: 10pt; margin: 9px 0 5px; break-after: avoid; }
+.section-icon { display: inline-block; margin-right: 6px; font-size: 12pt; }
+.key-idea { color: #312e81; margin: 0 0 9px; padding: 8px 11px; border-left: 3px solid #6366f1;
+  border-radius: 0 7px 7px 0; background: #eef2ff; break-inside: avoid; }
 .formula { background: #f1f5f9; border-left: 3px solid #7c3aed; padding: 6px 10px;
   margin: 5px 0; font-family: Consolas, "Cambria Math", monospace; white-space: pre-wrap; }
-.example { border-left: 3px solid #10b981; padding: 5px 10px; margin: 5px 0; background: #f0fdf4; }
-.glossary { display: grid; grid-template-columns: 1fr 2fr; gap: 0 14px; }
-.glossary dt, .glossary dd { margin: 0; padding: 6px 0; border-bottom: 1px solid #e2e8f0; break-inside: avoid; }
-.glossary dt { color: #047857; font-weight: 750; }
-.glossary dd { color: #334155; }
+.examples { margin-top: 9px; padding: 9px 12px; border: 1px solid #fde68a; border-left: 4px solid #f59e0b;
+  border-radius: 8px; background: #fffbeb; break-inside: avoid; }
+.examples h4 { margin: 0 0 5px !important; color: #92400e !important; }
+.example { color: #78350f; margin: 4px 0; }
+.glossary { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.glossary th, .glossary td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid #e2e8f0; }
+.glossary th { color: #047857; background: #ecfdf5; font-weight: 750; }
+.glossary tbody tr:nth-child(even) { background: #f8fafc; }
+.glossary td:first-child { width: 30%; color: #047857; font-weight: 750; }
+.diagram { margin: 11px 0; padding: 12px 14px; border: 1px solid #c7d2fe; border-radius: 11px;
+  background: linear-gradient(135deg, #f8faff, #f0fdfa); break-inside: avoid;
+  box-shadow: 0 2px 8px rgba(49, 46, 129, .07); }
+.diagram-title { margin-bottom: 10px; color: #4338ca; font-size: 8pt; font-weight: 800;
+  letter-spacing: .08em; text-transform: uppercase; }
+.flow { display: flex; align-items: stretch; justify-content: center; gap: 7px; flex-wrap: wrap; }
+.flow-node { flex: 1 1 105px; display: flex; align-items: center; justify-content: center; min-height: 42px;
+  padding: 7px 9px; border: 1px solid #c7d2fe; border-radius: 8px; background: #fff;
+  color: #3730a3; text-align: center; font-weight: 700; box-shadow: 0 1px 3px rgba(49, 46, 129, .08); }
+.flow-arrow { align-self: center; color: #7c3aed; font-size: 13pt; font-weight: 900; }
+.tree-root { width: fit-content; margin: 0 auto 11px; padding: 7px 14px; border-radius: 8px;
+  background: #312e81; color: white; text-align: center; font-weight: 750; }
+.tree-branches { display: flex; justify-content: center; gap: 8px; padding-top: 9px;
+  border-top: 2px solid #a5b4fc; }
+.tree-branch { flex: 1; padding: 8px 10px; border-top: 3px solid #06b6d4; border-radius: 7px;
+  background: #ecfeff; text-align: center; font-weight: 700; }
+.tree-branch ul { margin: 4px 0 0; padding-left: 16px; color: #334155; text-align: left; font-weight: 400; }
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.compare-group { padding: 9px 11px; border: 1px solid #c7d2fe; border-radius: 8px;
+  background: #eef2ff; break-inside: avoid; }
+.compare-group:nth-child(2) { background: #ecfeff; }
+.compare-group:nth-child(3) { background: #f0fdf4; }
+.compare-group b { color: #3730a3; }
+.compare-group ul { margin: 4px 0 0; padding-left: 16px; }
+.quickref { margin-top: 14px; padding: 12px 14px; border: 1px solid #c7d2fe; border-radius: 12px;
+  background: linear-gradient(135deg, #eef2ff, #f0fdfa); break-inside: avoid; }
+.quickref h2 { margin-bottom: 7px; color: #312e81; font-size: 13pt; }
+.quickref-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+.quickref-item { padding: 6px 8px; border-radius: 6px; background: rgba(255,255,255,.8); }
+.quickref-item b { color: #4338ca; }
 ol.num { margin: 0; padding: 0; list-style: none; counter-reset: n; }
 ol.num li { counter-increment: n; position: relative; padding-left: 28px; margin-bottom: 6px; }
 ol.num li::before { content: counter(n); position: absolute; left: 0; top: 1px; width: 19px; height: 19px;
@@ -107,10 +146,15 @@ h2.pg { font-size: 15pt; margin-bottom: 3px; } .sub { color: #64748b; font-size:
 .raw { background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 7px 10px; border-radius: 0 8px 8px 0; color: #334155; font-size: 9.5pt; white-space: pre-wrap; }
 .none { color: #94a3b8; font-style: italic; font-size: 9pt; }
 .qa { margin-bottom: 11px; break-inside: avoid; } .qa .q { font-weight: 700; } .qa .a { color: #047857; margin-top: 2px; }
+.selftest { margin-top: 14px; break-inside: avoid; }
+.quiz-card { break-inside: avoid; }
 .tr h3 { font-size: 9.5pt; margin: 12px 0 4px; color: #4338ca; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
 .tr p { font-size: 8.8pt; margin-bottom: 3px; color: #1e293b; break-inside: avoid; }
 .tr .tm { color: #94a3b8; font-family: Consolas, monospace; font-size: 8pt; margin-right: 6px; }
 .tr .sp { color: #6366f1; font-weight: 700; margin-right: 4px; }
+.qa { padding: 8px 10px; border-radius: 8px; background: #f8fafc; }
+.qa .a { margin-top: 5px; padding: 6px 9px; border-radius: 6px; background: #ecfdf5; }
+.qa .q { break-after: avoid; }
 """
 
 
@@ -130,7 +174,71 @@ def _color(n: int) -> str:
     return PALETTE[(n - 1) % len(PALETTE)]
 
 
-def _lecture_title(ctx: Dict) -> str:
+def _section_icon(heading: str) -> str:
+    text = heading.casefold()
+    for words, icon in (
+        (("test", "exam"), "🧪"),
+        (("phase", "process", "step", "life cycle", "lifecycle"), "➡️"),
+        (("type", "category", "class", "hierarch"), "🌿"),
+        (("compare", "versus", " vs ", "difference"), "⚖️"),
+        (("architecture", "design", "structure"), "🏗️"),
+        (("formula", "equation", "calculate"), "∑"),
+    ):
+        if any(word in text for word in words):
+            return icon
+    return "✦"
+
+
+def _diagram(diagram: Dict) -> str:
+    title = f'<div class="diagram-title">{_e(diagram.get("title") or "Concept map")}</div>'
+    diagram_type = diagram.get("type")
+    if diagram_type in ("process", "analogy"):
+        nodes = diagram.get("nodes") or []
+        body = '<div class="flow">' + "".join(
+            (f'<span class="flow-arrow" aria-hidden="true">→</span>' if index else "")
+            + f'<span class="flow-node" dir="auto">{_e(node)}</span>'
+            for index, node in enumerate(nodes)
+        ) + "</div>"
+    elif diagram_type == "hierarchy":
+        branches = "".join(
+            f'<div class="tree-branch" dir="auto">{_e(branch["label"])}'
+            + (_ul(branch["children"]) if branch.get("children") else "")
+            + "</div>"
+            for branch in diagram.get("branches", [])
+        )
+        body = (f'<div class="tree-root" dir="auto">{_e(diagram.get("root", ""))}</div>'
+                f'<div class="tree-branches">{branches}</div>')
+    elif diagram_type == "comparison":
+        groups = "".join(
+            f'<div class="compare-group" dir="auto"><b>{_e(group["label"])}</b>'
+            + (_ul(group["items"]) if group.get("items") else "")
+            + "</div>"
+            for group in diagram.get("groups", [])
+        )
+        body = f'<div class="compare">{groups}</div>'
+    else:
+        return ""
+    return f'<div class="diagram">{title}{body}</div>'
+
+
+def _timestamp(value: str, start_time: str) -> str:
+    try:
+        current = [int(part) for part in value.split(":")]
+        start = [int(part) for part in start_time.split(":")]
+        elapsed = (current[0] * 3600 + current[1] * 60 + current[2]
+                   - start[0] * 3600 - start[1] * 60 - start[2]) % 86400
+        hours, remainder = divmod(elapsed, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
+    except (TypeError, ValueError, IndexError):
+        return value
+
+
+def _unprefix_number(value: str) -> str:
+    return re.sub(r"^\s*\d+[.)]\s*", "", str(value))
+
+
+def lecture_title(ctx: Dict) -> str:
     summary = ctx.get("summary") or {}
     for candidate in (
         ctx.get("title"),
@@ -170,7 +278,7 @@ def _radar_items(emphasis: List[str], flags: List[Dict]) -> List[Dict]:
 
 def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     options = options or {}
-    subject, slides = _lecture_title(ctx), ctx.get("slides", [])
+    subject, slides = lecture_title(ctx), ctx.get("slides", [])
     summary = ctx.get("summary") or {}
     flags = ctx.get("flags", [])
     total_s = max(1, ctx.get("duration_s", 1))
@@ -200,29 +308,31 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                          + "".join(f'<li dir="auto">{_e(x)}</li>' for x in summary["summary"]) + "</ol></div>")
 
     radar_items = _radar_items(summary.get("emphasis") or [], flags)
-    if radar_items:
-        seen_kinds = set()
-        radar = []
-        for item in radar_items:
-            kind = str(item.get("kind") or "")
-            badge = _pill(kind, item.get("label") or kind.title()) if kind and kind not in seen_kinds else ""
-            if kind:
-                seen_kinds.add(kind)
-            time = str(item.get("time") or "").strip()
+    if flags or any(not item.get("kind") for item in radar_items):
+        quotes = []
+        for item in flags:
+            timestamp = _timestamp(str(item.get("time") or ""), str(ctx.get("start_time") or ""))
             slide = item.get("slide")
             location = " · ".join(
-                value for value in (
-                    time,
-                    f"Slide {slide}" if slide else "",
-                ) if value
+                value for value in (timestamp, f"Slide {slide}" if slide else "") if value
             )
-            radar.append(
-                f'<div class="flag">{badge}<div dir="auto">{_e(item["text"])}'
+            quotes.append(
+                f'<div class="flag">{_pill(str(item.get("kind") or ""), item.get("label") or "Flagged")}'
+                f'<div dir="auto"><q>{_e(item.get("text", ""))}</q>'
                 f'{f" <span class=t>· {_e(location)}</span>" if location else ""}</div></div>'
             )
+        takeaways = [
+            f'<li dir="auto">{_e(item["text"])}</li>'
+            for item in radar_items if not item.get("kind")
+        ]
         cover.append(
-            f'<div class="card radar"><h2>Key moments</h2>{"".join(radar)}</div>'
+            f'<div class="card radar"><h2>Key moments</h2>{"".join(quotes) or "<div class=none>No flagged quotes.</div>"}</div>'
         )
+        if takeaways:
+            cover.append(
+                '<div class="card takeaways"><h2>Key takeaways</h2><ul class="plain">'
+                + "".join(takeaways) + "</ul></div>"
+            )
 
     todo = []
     for h in summary.get("homework", []) or []:
@@ -244,50 +354,58 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         else:
             cover.append('<div class="hint">AI notes were not generated. Add an AI provider key and enable AI summaries '
                          'in Dashboard → Settings to create organized study notes.</div>')
-    pages = [f'<section class="page cover">{"".join(cover)}</section>']
-
     # ── structured AI study notes ─────────────────────────
     if summary.get("sections"):
         cards = []
         for section in summary["sections"]:
-            body = [f'<h3 dir="auto">{_e(section.get("heading", ""))}</h3>']
+            heading = str(section.get("heading", ""))
+            body = [f'<h3 dir="auto"><span class="section-icon">{_section_icon(heading)}</span>{_e(heading)}</h3>']
             if section.get("key_idea"):
                 body.append(f'<p class="key-idea" dir="auto"><b>Key idea:</b> {_e(section["key_idea"])}</p>')
+            for diagram in section.get("diagrams") or []:
+                body.append(_diagram(diagram))
             if section.get("bullets"):
                 body.append(_ul(section["bullets"]))
             if section.get("steps"):
-                body.append('<h4>Steps</h4><ol class="num">'
-                            + "".join(f'<li dir="auto">{_e(item)}</li>' for item in section["steps"])
+                body.append('<h4>Process</h4><ol class="num">'
+                            + "".join(f'<li dir="auto">{_e(_unprefix_number(item))}</li>'
+                                      for item in section["steps"])
                             + "</ol>")
             if section.get("equations"):
                 body.append('<h4>Equations &amp; formulas</h4>')
                 body.extend(f'<div class="formula" dir="auto">{_e(item)}</div>' for item in section["equations"])
             if section.get("examples"):
-                body.append('<h4>Examples</h4>')
-                body.extend(f'<div class="example" dir="auto">{_e(item)}</div>' for item in section["examples"])
+                body.append(
+                    '<div class="examples"><h4>💡 Examples</h4>'
+                    + "".join(f'<div class="example" dir="auto">{_e(item)}</div>' for item in section["examples"])
+                    + "</div>"
+                )
             cards.append(f'<div class="card lecture">{"".join(body)}</div>')
         if terms:
             cards.append(
-                '<div class="card terms"><h3>Key terms</h3><dl class="glossary">'
+                '<div class="card terms"><h3>Key terms</h3><table class="glossary"><thead><tr><th>Term</th><th>Definition</th></tr></thead><tbody>'
                 + "".join(
-                    f'<dt dir="auto">{_e(term["term"])}</dt><dd dir="auto">{_e(term["definition"])}</dd>'
+                    f'<tr><td dir="auto">{_e(term["term"])}</td><td dir="auto">{_e(term["definition"])}</td></tr>'
                     for term in terms
                 )
-                + "</dl></div>"
+                + "</tbody></table></div>"
             )
-        pages.append('<section class="page"><h2 class="pg">Organized study notes</h2>'
-                     '<div class="sub">Key concepts, explanations, formulas, and examples from the lecture.</div>'
-                     + "".join(cards) + "</section>")
+        cover.append(
+            '<div class="notes-start"><h2 class="pg">Organized study notes</h2>'
+            '<div class="sub">Key concepts, explanations, formulas, and examples from the lecture.</div>'
+            + "".join(cards) + "</div>"
+        )
     elif terms:
-        pages.append(
-            '<section class="page"><h2 class="pg">Key terms</h2>'
-            '<dl class="card terms glossary">'
+        cover.append(
+            '<div class="notes-start"><h2 class="pg">Key terms</h2>'
+            '<div class="card terms"><table class="glossary"><thead><tr><th>Term</th><th>Definition</th></tr></thead><tbody>'
             + "".join(
-                f'<dt dir="auto">{_e(term["term"])}</dt><dd dir="auto">{_e(term["definition"])}</dd>'
+                f'<tr><td dir="auto">{_e(term["term"])}</td><td dir="auto">{_e(term["definition"])}</td></tr>'
                 for term in terms
             )
-            + "</dl></section>"
+            + "</tbody></table></div></div>"
         )
+    pages = [f'<section class="page cover">{"".join(cover)}</section>']
 
     # ── at a glance ─────────────────────────────────────
     if slides:
@@ -295,8 +413,16 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             f'<a class="thumb" href="#s{s["n"]}"><img src="{_e(s["file"])}" alt=""><div class="cap">'
             f'<b>{"Snapshot" if s["kind"] == "moment" else "Slide"} {s["n"]}</b><span>{_e(s["time"])}</span></div></a>'
             for s in slides)
-        pages.append(f'<section class="page"><h2 class="pg">Lecture at a glance</h2>'
-                     f'<div class="sub">Every slide in order — click one to jump to its notes.</div><div class="grid">{thumbs}</div></section>')
+        glance = (
+            '<h2 class="pg">Lecture at a glance</h2>'
+            '<div class="sub">Every slide in order — click one to jump to its notes.</div>'
+            f'<div class="grid">{thumbs}</div>'
+        )
+        if not summary.get("sections") and not terms:
+            cover.append(f'<div class="notes-start">{glance}</div>')
+            pages[0] = f'<section class="page cover">{"".join(cover)}</section>'
+        else:
+            pages.append(f'<section class="page">{glance}</section>')
 
     # ── slide pages ─────────────────────────────────────
     for s in slides:
@@ -323,12 +449,13 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     if quiz:
         qs = "".join(
             f'<div class="qa"><div class="q" dir="auto">{i}. {_e(q["q"])}</div>'
-            f'<div class="a" dir="auto"><b>Answer:</b> {_e(q.get("a", ""))}</div></div>'
+            f'<div class="a" dir="auto"><b>Check your answer:</b> {_e(q.get("a", ""))}</div></div>'
             for i, q in enumerate(quiz, 1)
         )
         pages.append(
-            f'<section class="page"><h2 class="pg">Self-test &amp; answers</h2>'
-            f'<div class="sub">Review each question, then check the answer.</div>{qs}</section>'
+            f'<section class="page selftest"><h2 class="pg">Self-test &amp; answers</h2>'
+            f'<div class="sub">Review each question, then check the answer.</div>'
+            f'<div class="card quiz-card">{qs}</div></section>'
         )
 
     # ── transcript ──────────────────────────────────────
@@ -348,13 +475,33 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         pages.append('<section class="page tr"><h2 class="pg">Full transcript</h2>'
                      f'<div class="sub">{_e(transcript_note)}</div>' + "".join(groups) + "</section>")
 
+    quick_items = [
+        f'<div class="quickref-item" dir="auto"><b>{_e(section.get("heading", "Topic"))}</b>'
+        + (f'<br>{_e(section.get("key_idea", ""))}' if section.get("key_idea") else "")
+        + "</div>"
+        for section in (summary.get("sections") or [])[:6]
+    ]
+    if quick_items:
+        pages.append(
+            '<section class="page"><div class="quickref"><h2>Quick reference</h2>'
+            '<div class="quickref-grid">' + "".join(quick_items) + "</div></div></section>"
+        )
+
     return (f'<!DOCTYPE html><html><head><meta charset="utf-8"><title>{_e(subject)} — {_e(ctx["date_str"])}</title>'
             f"<style>{CSS}</style></head><body>{''.join(pages)}</body></html>")
 
 
-async def render_pdf(html_path: Path, pdf_path: Path, paper_size: str = "A4") -> bool:
+async def render_pdf(
+    html_path: Path,
+    pdf_path: Path,
+    paper_size: str = "A4",
+    document_title: str = "Lecture Notes",
+) -> bool:
+    footer_title = html.escape(document_title, quote=True)
     footer = ('<div style="width:100%;font-size:8px;color:#64748b;text-align:center;'
-              'font-family:Arial,sans-serif"><span class="pageNumber"></span></div>')
+              'font-family:Arial,sans-serif"><span>'
+              f'{footer_title} · <span class="pageNumber"></span>/<span class="totalPages"></span>'
+              '</span></div>')
     try:
         async with async_playwright() as p:
             browser = None

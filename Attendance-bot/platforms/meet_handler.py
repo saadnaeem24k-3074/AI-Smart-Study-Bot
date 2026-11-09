@@ -9,12 +9,12 @@ from typing import List, Dict, Optional
 from playwright.async_api import async_playwright, BrowserContext
 from core.logger import setup_logger
 from detection.attendance_detector import AttendanceDetector
-from detection.burst_detector import BurstDetector
 from detection.whisper_asr import WhisperRecognizer
 from core import config_store
 from utils.alerts import CalledAlert
 from utils.slide_capture import SlideCapture
 from utils.selectors import MEET
+from utils import ai_notes
 
 logger = setup_logger("MeetHandler")
 
@@ -22,6 +22,22 @@ _CAPTION_UI = re.compile(
     r"no chat messages yet|format_size|open caption settings|font size|font colour|"
     r"returning to home screen|\b\d+\s+seconds?\s+left\b|"
     r"\blanguage\s*:\s*english\b",
+    re.IGNORECASE,
+)
+_QUESTION_CUE = re.compile(
+    r"[?؟]|\b(?:what|why|how|when|where|which|who|whose|whom|"
+    r"kya|kyun|kaise|kab|kahan|kon|kis|kitna|kitni)\b|"
+    r"\b(?:can|could|would|should|will)\s+you\b|"
+    r"(?:کیا|کیوں|کیسے|کب|کہاں|کون|کس)",
+    re.IGNORECASE,
+)
+_ANSWER_PROMPT = re.compile(
+    r"\b(?:answer|respond|explain|tell us|your thoughts)\b|(?:جواب|بتائیں|سمجھائیں)",
+    re.IGNORECASE,
+)
+_MIC_QUESTION_PROMPT = re.compile(
+    r"\b(?:explain|define|summarize|summarise|tell me|what is|how does|"
+    r"why does|compare|describe)\b|(?:سمجھائیں|بتائیں|وضاحت)",
     re.IGNORECASE,
 )
 
@@ -51,10 +67,16 @@ class MeetHandler:
         self.context: Optional[BrowserContext] = None
         self.page        = None
         self.detector    = AttendanceDetector(config)
-        self.burst       = BurstDetector()
         self.captions: deque = deque(maxlen=50)
+        self._question_caption_texts = {}
+        self._seen_chat_message_set = set()
+        self._pending_live_question = ""
+        self._pending_live_question_at = 0.0
+        self._pending_name_at = 0.0
+        self._last_queued_question = ""
+        self._question_answer_task = None
+        self._missing_question_key_logged = False
         self._chat_opened = False
-        self._low_count_since: float = 0.0  # grace period for low participant count
         self.features    = config_store.get_features(config)
         self.recorder    = None            # NotesRecorder (attached by SessionManager)
         self.slides      = None            # SlideCapture
@@ -67,6 +89,7 @@ class MeetHandler:
         self._caption_warning_logged = False
         self.whisper = None
         self._whisper_texts: queue.Queue = queue.Queue()
+        self._whisper_speech: queue.Queue = queue.Queue()
 
     def attach_recorder(self, rec):
         """Hook up lecture notes + slide capture for this session."""
@@ -151,20 +174,38 @@ class MeetHandler:
             pass
 
         logger.info("[Meet] Joined successfully with mic/cam OFF.")
-        if (self.recorder is not None and self.recorder.enabled
-                and self.features.get("whisper_transcription", True)):
-            self.whisper = WhisperRecognizer(on_transcript=self._whisper_texts.put)
+        if self.features.get("whisper_transcription", True):
+            self.whisper = WhisperRecognizer(
+                on_transcript=self._whisper_texts.put,
+                on_speech=self._queue_whisper_speech,
+            )
             self.whisper.start()
 
+    def _queue_whisper_speech(self, text, source):
+        self._whisper_speech.put((text, source))
+
     def _record_whisper_transcripts(self):
-        if self.recorder is None:
-            return
         while True:
             try:
                 text = self._whisper_texts.get_nowait()
             except queue.Empty:
                 break
-            self.recorder.add_audio_transcript(text)
+            if self.recorder is not None:
+                self.recorder.add_audio_transcript(text)
+        while True:
+            try:
+                text, source = self._whisper_speech.get_nowait()
+            except queue.Empty:
+                break
+            if source == "microphone":
+                self._handle_microphone_transcript(text)
+
+    def _handle_microphone_transcript(self, text):
+        text = " ".join(str(text or "").split())
+        if not text or not (_QUESTION_CUE.search(text) or _MIC_QUESTION_PROMPT.search(text)):
+            return
+        logger.info(f"[Meet] Microphone question detected: '{text[:160]}'")
+        self._queue_live_answer(text)
 
     async def _auto_sign_in(self):
         account  = self.config.get("google_account", {})
@@ -503,11 +544,11 @@ class MeetHandler:
         return _parse_caption_blocks(raw)
 
     async def _send_present(self, tg, cls, state, how: str) -> bool:
-        """Send "Present". Marks attendance ONLY if it was really sent; otherwise
+        """Send "Present Sir". Marks attendance ONLY if it was really sent; otherwise
         keeps retrying and alerts you so you can type it yourself."""
         self._present_tries += 1
         self._last_present_try = _time.time()
-        ok = await self.send_chat("Present")
+        ok = await self.send_chat("Present Sir")
         if ok:
             state.mark_attendance()
             self._pending_present = False
@@ -575,34 +616,119 @@ class MeetHandler:
         chat = await self._read_chat()
         if chat:
             logger.info(f"[Meet] Chat({len(chat)}): {str(chat[-2:])[:120]}")
-
-        # Burst detection
-        count, burst = self.burst.check_with_count(chat)
-        if count > 0:
-            logger.info(f"[Meet] Burst count={count} triggered={burst} already_sent={already_sent}")
-
-        if burst and not already_sent:
-            logger.info("[Meet] BURST — sending Present")
-            tg.burst_detected(cls, count)
-            await self._send_present(tg, cls, state, "Burst")
-            self.detector.reset()
-            return
+            self._check_for_addressed_chat_questions(chat)
 
         # Caption-based detection — pass raw caption directly (not joined deque)
         latest = cap if cap else (self.captions[-1] if self.captions else "")
         if not already_sent:
             result = self.detector.analyze(latest)
             if result == "mark_present":
-                logger.info("[Meet] Roll call — sending Present")
+                logger.info("[Meet] Attendance keyword or roll number — sending Present Sir")
                 await self._send_present(tg, cls, state, "Roll call")
                 # Do NOT reset detector — _present_sent stays True to block future sends
-            elif result == "question_asked":
-                logger.info("[Meet] Question — sending Mic kharab hai")
-                await self.send_chat("Mic kharab hai")
         else:
-            if burst:
-                logger.info("[Meet] Burst detected but Present already sent — ignoring")
             self.detector.analyze(latest)
+        self._check_for_addressed_question(blocks)
+
+    def _check_for_addressed_question(self, blocks):
+        now = _time.time()
+        if now - self._pending_live_question_at > 90:
+            self._pending_live_question = ""
+        if now - self._pending_name_at > 45:
+            self._pending_name_at = 0.0
+
+        for index, (speaker, text) in enumerate(blocks):
+            key = speaker or f"unknown-{index}"
+            previous = self._question_caption_texts.get(key, "")
+            if text.startswith(previous):
+                delta = text[len(previous):]
+            elif previous.startswith(text):
+                delta = ""
+            else:
+                delta = text
+            self._question_caption_texts[key] = text
+            if not delta.strip():
+                continue
+
+            addressed = (
+                self.detector.is_name_mentioned(text)
+                or self.detector.is_roll_mentioned(text)
+            )
+            question = bool(_QUESTION_CUE.search(text))
+            if question:
+                previous_question = self._pending_live_question
+                self._pending_live_question = text.strip()
+                self._pending_live_question_at = now
+                if addressed or self._pending_name_at:
+                    selected_question = (
+                        previous_question
+                        if addressed and previous_question and _ANSWER_PROMPT.search(text)
+                        else self._pending_live_question
+                    )
+                    self._queue_live_answer(selected_question)
+            elif addressed:
+                self._pending_name_at = now
+                if self._pending_live_question:
+                    self._queue_live_answer(self._pending_live_question)
+
+    def _check_for_addressed_chat_questions(self, messages):
+        for message in messages:
+            normalized = " ".join(str(message or "").casefold().split())
+            if not normalized or normalized in self._seen_chat_message_set:
+                continue
+            self._remember_chat_message(normalized)
+            addressed = (
+                self.detector.is_name_mentioned(normalized)
+                or self.detector.is_roll_mentioned(normalized)
+            )
+            if addressed and _QUESTION_CUE.search(normalized):
+                self._queue_live_answer(message)
+
+    def _remember_chat_message(self, message):
+        normalized = " ".join(str(message or "").casefold().split())
+        if not normalized or normalized in self._seen_chat_message_set:
+            return
+        self._seen_chat_message_set.add(normalized)
+
+    def _queue_live_answer(self, question):
+        normalized = " ".join(re.sub(r"\W+", " ", question.casefold()).split())
+        if not normalized or normalized == self._last_queued_question:
+            return
+        if self._question_answer_task and not self._question_answer_task.done():
+            logger.info("[Meet] A live question is already being answered; skipping duplicate.")
+            return
+        self._last_queued_question = normalized
+        self._pending_live_question = ""
+        self._pending_live_question_at = 0.0
+        self._pending_name_at = 0.0
+        self._question_answer_task = asyncio.create_task(self._answer_live_question(question))
+
+    async def _answer_live_question(self, question):
+        if not ai_notes.api_key(self.config):
+            if not self._missing_question_key_logged:
+                logger.warning(
+                    "[Meet] Cannot answer live questions without an AI provider key. "
+                    "Add one in Dashboard → Settings → AI."
+                )
+                self._missing_question_key_logged = True
+            return
+
+        context = self.recorder._plain() if self.recorder is not None else ""
+        if not context.strip():
+            context = "\n".join(self.captions)
+        try:
+            answer = await asyncio.to_thread(
+                ai_notes.answer_question, self.config, context, question
+            )
+            if not answer:
+                logger.warning("[Meet] The AI provider could not answer the live question.")
+                return
+            if len(answer) > 1600:
+                answer = answer[:1597].rsplit(" ", 1)[0] + "..."
+            if not await self.send_chat(answer):
+                logger.error("[Meet] Could not send the live question answer to meeting chat.")
+        except Exception as e:
+            logger.error(f"[Meet] Live question answering failed: {e}")
 
     def _name_in_captions(self) -> bool:
         text = " ".join(self.captions).lower()
@@ -611,7 +737,6 @@ class MeetHandler:
     async def is_meeting_ended(self) -> bool:
         """
         Returns True when meeting is fully ended for everyone.
-        Also returns True if participant count < 5 for 2 consecutive minutes.
         """
         try:
             # End screen detection
@@ -626,56 +751,9 @@ class MeetHandler:
                 if await self.page.locator(f':has-text("{phrase}")').count() > 0:
                     logger.info("[Meet] End screen detected.")
                     return True
-
-            # Participant count via JavaScript (most reliable)
-            count = await self._get_participant_count()
-            if count > 0:
-                logger.info(f"[Meet] Participant count: {count}")
-                min_p = config_store.min_participants(self.config)
-                if count < min_p:
-                    if self._low_count_since == 0.0:
-                        self._low_count_since = _time.time()
-                        logger.info(f"[Meet] Count={count} < {min_p} — 2min grace started")
-                    elif _time.time() - self._low_count_since >= 120:
-                        logger.info(f"[Meet] Count < {min_p} for 2min — leaving.")
-                        return True
-                else:
-                    if self._low_count_since > 0.0:
-                        logger.info(f"[Meet] Count back to {count} — grace reset")
-                    self._low_count_since = 0.0
-
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Meet] Could not check for meeting end screen: {e!r}")
         return False
-
-    async def _get_participant_count(self) -> int:
-        """Get participant count via JavaScript — most reliable method."""
-        try:
-            count = await self.page.evaluate("""() => {
-                // Method 1: people button aria-label e.g. "People (25)"
-                const btns = document.querySelectorAll('button, [role="button"]');
-                for (const btn of btns) {
-                    const aria = btn.getAttribute('aria-label') || '';
-                    const match = aria.match(/\((\d+)\)/);
-                    if (match && (aria.toLowerCase().includes('people') ||
-                                  aria.toLowerCase().includes('participant'))) {
-                        return parseInt(match[1]);
-                    }
-                }
-                // Method 2: count video tiles (each participant has one)
-                const tiles = document.querySelectorAll('[jsname="kAPMuc"]');
-                if (tiles.length > 0) return tiles.length;
-
-                // Method 3: participant list items
-                const items = document.querySelectorAll('[data-participant-id]');
-                if (items.length > 0) return items.length;
-
-                return 0;
-            }""")
-            return count or 0
-        except Exception:
-            pass
-        return 0
 
     async def screenshot(self, path: str):
         try:

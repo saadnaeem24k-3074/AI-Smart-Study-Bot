@@ -155,6 +155,33 @@ h2.pg { font-size: 15pt; margin-bottom: 3px; } .sub { color: #64748b; font-size:
 .qa { padding: 8px 10px; border-radius: 8px; background: #f8fafc; }
 .qa .a { margin-top: 5px; padding: 6px 9px; border-radius: 6px; background: #ecfdf5; }
 .qa .q { break-after: avoid; }
+
+body{font-family:"Times New Roman","Noto Serif",Georgia,serif;font-size:11pt;line-height:1.5;color:#000;counter-reset:sec}
+.hero{background:none !important;color:#000;border-radius:0;padding:0 0 12px;border-bottom:3px double #000;text-align:center}
+.kicker{opacity:1;letter-spacing:.3em}.when{opacity:1}.chips{justify-content:center}
+.chip{background:none;border:1px solid #000;border-radius:0;color:#000}
+.card{border:0 !important;border-radius:0;background:none !important;padding:0;margin-top:16px}
+.card h2,h2.pg{font-size:14pt;color:#000;text-transform:none;letter-spacing:0;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:8px}
+.card h2::before,h2.pg::before{counter-increment:sec;content:counter(sec) ". "}
+.notes-start{counter-reset:sub}
+.card.lecture{margin-top:18px;break-inside:auto !important}.card.lecture h3{color:#000;font-size:12.5pt;border-bottom:1px solid #000}
+.card.lecture h3::before{counter-increment:sub;content:counter(sub) ". "}
+.card.lecture h4,.notes h3{color:#000;letter-spacing:0}.section-icon{display:none}
+.key-idea{background:#fff;border:1px solid #000;border-left:5px solid #000;border-radius:0;color:#000}
+.formula{background:#fff;border:1px solid #000;border-radius:0}
+.examples{background:#fff;border:1px dashed #000;border-radius:0}.examples h4,.example{color:#000 !important}
+.glossary{border:1px solid #000}.glossary th{background:#000;color:#fff}
+.glossary th,.glossary td{border:1px solid #000}.glossary td:first-child{color:#000}
+.glossary tbody tr:nth-child(even){background:#f2f2f2}
+ol.num li::before{background:#000;border-radius:0}ul.check li::before{border-color:#000;border-radius:0}
+.pill{background:#000 !important;border-radius:0}.flag .t,.sub,.sm,.tm,.sp{color:#333}
+.tl{filter:grayscale(1)}.thumb{border:1px solid #000;border-radius:0}.thumb .cap b{color:#000}
+.slide .num{background:#000 !important;border-radius:0}.slide img{border:1px solid #000;border-radius:0;box-shadow:none}
+.take{background:#f2f2f2;border-left:5px solid #000;border-radius:0}.take small{color:#000}
+.raw{background:#f2f2f2;border-left:3px solid #000;border-radius:0}
+.qa,.qa .a{background:none;border:1px solid #000;border-radius:0}.qa .a{border:0;border-top:1px dashed #000;border-radius:0}
+.quickref{background:none;border:1px solid #000;border-radius:0}.quickref h2{color:#000}.quickref-item{background:none;border:1px solid #000;border-radius:0}.quickref-item b{color:#000}
+.hint{background:#f2f2f2;border-radius:0;color:#000}.tr h3{color:#000;border-bottom:1px solid #000}
 """
 
 
@@ -456,6 +483,25 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             f'<section class="page selftest"><h2 class="pg">Self-test &amp; answers</h2>'
             f'<div class="sub">Review each question, then check the answer.</div>'
             f'<div class="card quiz-card">{qs}</div></section>'
+        )
+
+    # ── questions asked in class ────────────────────────
+    cqs = [q for q in (ctx.get("class_questions") or []) if q.get("text")]
+    if cqs:
+        items = "".join(
+            f'<div class="qa"><div class="q" dir="auto">{i}. {_e(q["text"])} '
+            f'<span class="sm">{_e(q.get("time", ""))}</span>'
+            + (' <span class="snapbadge">Asked to you</span>' if q.get("to_me") else "")
+            + '</div>'
+            + (f'<div class="a" dir="auto"><b>{"Bot reply in chat" if q.get("bot_answer") else "Answer"}:</b> '
+               f'{_e(q.get("answer", ""))}</div>' if q.get("answer") else "")
+            + '</div>'
+            for i, q in enumerate(cqs, 1)
+        )
+        pages.append(
+            f'<section class="page selftest"><h2 class="pg">Questions Asked in Class</h2>'
+            f'<div class="sub">Every question raised during the lecture, with its answer.</div>'
+            f'<div class="card quiz-card">{items}</div></section>'
         )
 
     # ── transcript ──────────────────────────────────────

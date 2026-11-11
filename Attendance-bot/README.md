@@ -340,3 +340,25 @@ sounddevice==0.4.6          WASAPI loopback audio capture
 | `logs/state.json` | Live bot state |
 | `logs/watchdog.log` | Crash/restart history |
 | `screenshots/*.png` | Error screenshots |
+
+## Notes right after class (v-latest)
+
+- The bot watches the call every 2 s. When the host ends the meeting (or removes the bot, the
+  call page closes, or everyone leaves for 2 min) it stops recording and **starts the notes
+  immediately** — it does not wait for the scheduled duration.
+- Notes are generated in the background, so a class 10 minutes later is joined on time.
+  If note generation fails it retries once; when finished, Telegram (if enabled) gets the PDF.
+- Slides: the "(Presentation)" tile is captured at any size, not only in full screen.
+- Optional settings (`global_settings` in schedule.json): `end_when_alone_secs` (default 120).
+  Env: `WHISPER_LANGUAGE=en|ur` to force the local Whisper language.
+
+## Live question answering (strict)
+
+- The bot answers in chat **only** when the teacher calls you by **full name** ("Saad Naeem") or
+  **roll number** ("24K3074"). Questions put to other students are never answered — including
+  speech heard on the microphone/speakers.
+- A bare "Saad" is ignored by default (other students may share it). To accept it too, set
+  `"respond_to_first_name": true` under `student` in schedule.json.
+- Every question heard in class is remembered and added to the notes ("Questions Asked in
+  Class" page in notes.pdf, section in transcript.md, `class_questions.json`), with the
+  answer — your bot's chat reply if it answered, otherwise an AI answer from the lecture.

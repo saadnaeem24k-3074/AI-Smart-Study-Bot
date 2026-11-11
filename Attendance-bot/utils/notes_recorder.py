@@ -90,6 +90,7 @@ class NotesRecorder:
         self.slides: List[Dict] = []
         self.current_slide = 0
         self._last_flush = 0.0
+        self.questions: List[Dict] = []        # every question heard in class (memory for the notes)
         if self.enabled:
             self.dir.mkdir(parents=True, exist_ok=True)
             self._write_meta(done=False)
@@ -142,6 +143,36 @@ class NotesRecorder:
             return False
         self.feed([("Local audio (Whisper)", text)])
         return True
+
+    @staticmethod
+    def _qkey(text: str) -> str:
+        return " ".join(re.sub(r"\W+", " ", str(text or "").casefold()).split())
+
+    def add_question(self, text: str, to_me: bool = False, answer: str = "") -> None:
+        """Remember a question asked in class. `to_me` = the teacher called me, `answer` = what
+        the bot replied in chat. Growing captions ("What is an" -> "What is an algorithm?") and
+        repeats are merged into one entry."""
+        text = " ".join(str(text or "").split())
+        key = self._qkey(text)
+        if not self.enabled or len(key.split()) < 3:
+            return
+        for item in self.questions[-12:]:
+            old = self._qkey(item["text"])
+            if key == old or key.startswith(old) or old.startswith(key):
+                if len(text) > len(item["text"]):
+                    item["text"] = text
+                item["to_me"] = item["to_me"] or to_me
+                if answer:
+                    item["bot_answer"] = answer
+                break
+        else:
+            self.questions.append({"time": datetime.now(PKT).strftime("%H:%M:%S"), "text": text,
+                                   "to_me": bool(to_me), "bot_answer": answer})
+        try:
+            (self.dir / "class_questions.json").write_text(
+                json.dumps(self.questions, ensure_ascii=False, indent=1), encoding="utf-8")
+        except Exception:
+            pass
 
     def add_slide(self, rel_file: str, kind: str = "slide") -> int:
         n = len(self.slides) + 1
@@ -228,6 +259,11 @@ class NotesRecorder:
             if quiz:
                 parts.append("## Self-test\n" + "\n".join(
                     f"{i}. {q['q']}\n   - *{q.get('a', '')}*" for i, q in enumerate(quiz, 1)) + "\n")
+        if self.questions:
+            parts.append("## Questions asked in class\n" + "\n".join(
+                f"- `{q['time']}` {q['text']}" + (" **(asked to you)**" if q.get("to_me") else "")
+                + (f"\n  - Bot's chat reply: {q['bot_answer']}" if q.get("bot_answer") else "")
+                for q in self.questions) + "\n")
         if flags:
             parts.append("## Flagged moments\n" + "\n".join(
                 f"- **{f['label']}** `{f['time']}`: {f['text']}" for f in flags) + "\n")
@@ -341,6 +377,16 @@ class NotesRecorder:
             logger.info(f"[{self.subject}] Writing notes for {len(self.slides)} slides...")
             ai_slides = await ai_notes.slide_notes(self.config, per)
 
+        class_questions = [dict(q) for q in self.questions]
+        if class_questions and use_ai:
+            answers = await ai_notes.answer_class_questions(
+                self.config, plain, [q["text"] for q in class_questions])
+            for q, a in zip(class_questions, answers):
+                q["answer"] = a
+        for q in class_questions:                        # what the bot really said wins
+            if q.get("bot_answer"):
+                q["answer"] = q["bot_answer"]
+
         flags = lecture_insights.find_flags(transcript_segments)
         rows = []
         for i, sl in enumerate(self.slides):
@@ -368,6 +414,7 @@ class NotesRecorder:
             "words": sum(len(sg.text.split()) for sg in self.segments),
             "speakers": len({sg.speaker for sg in self.segments if sg.speaker}),
             "slides": rows, "summary": summary, "flags": flags,
+            "class_questions": class_questions,
             "ai_requested": use_ai,
             "keywords": keywords,
             "transcript": self._transcript_groups(transcript_segments),

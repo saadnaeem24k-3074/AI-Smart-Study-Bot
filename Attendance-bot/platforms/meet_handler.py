@@ -42,6 +42,18 @@ _MIC_QUESTION_PROMPT = re.compile(
 )
 
 
+_WH_WORD = re.compile(
+    r"\b(?:what|why|how|when|where|which|who|define|kya|kyun|kaise|kab|kahan|kon|kis)\b|"
+    r"(?:\u06a9\u06cc\u0627|\u06a9\u06cc\u0648\u06ba|\u06a9\u06cc\u0633\u06d2|\u06a9\u0628|\u06a9\u06c1\u0627\u06ba|\u06a9\u0648\u0646|\u06a9\u0633)",
+    re.IGNORECASE,
+)
+_CALL_ON = re.compile(r"\b(?:can|could|would|will)\s+you\b", re.IGNORECASE)
+
+
+def _sentences(text) -> list:
+    return [p.strip() for p in re.split(r"(?<=[.?!\u061f\u06d4])\s+", str(text or "").strip()) if p.strip()]
+
+
 def _parse_caption_blocks(raw) -> list:
     blocks = []
     for value in raw or []:
@@ -90,6 +102,15 @@ class MeetHandler:
         self.whisper = None
         self._whisper_texts: queue.Queue = queue.Queue()
         self._whisper_speech: queue.Queue = queue.Queue()
+        self._last_chat_log = None
+        self._end_checked_at = 0.0
+        self._end_hits = 0
+        self._alone_since = 0.0
+        self._was_in_call = False
+        self._weak_hits = 0
+        self.end_reason = ""
+        code = re.search(r"meet\.google\.com/(?:lookup/)?([a-z]{3}-[a-z]{4}-[a-z]{3})", self.link or "", re.I)
+        self._meeting_code = code.group(1).lower() if code else ""
 
     def attach_recorder(self, rec):
         """Hook up lecture notes + slide capture for this session."""
@@ -106,6 +127,8 @@ class MeetHandler:
             raise RuntimeError("No link provided for this class — skipping.")
 
         logger.info(f"[Meet] Joining: {self.link}")
+        if self.whisper is not None:                 # a failed earlier attempt may still hold the audio
+            self.stop_audio()
 
         profile = Path(self.settings.get("browser_profile", "profiles/bot_profile")).absolute()
         profile.mkdir(parents=True, exist_ok=True)
@@ -199,13 +222,30 @@ class MeetHandler:
                 break
             if source == "microphone":
                 self._handle_microphone_transcript(text)
+            else:                       # the teacher's audio: listen for my name / roll number
+                for sentence in _sentences(text):
+                    self._process_sentence(sentence)
 
     def _handle_microphone_transcript(self, text):
-        text = " ".join(str(text or "").split())
-        if not text or not (_QUESTION_CUE.search(text) or _MIC_QUESTION_PROMPT.search(text)):
-            return
-        logger.info(f"[Meet] Microphone question detected: '{text[:160]}'")
-        self._queue_live_answer(text)
+        """The microphone also hears the speakers/room, so it gets the SAME rule as captions:
+        answer only when my full name or roll number is called — never just because a question
+        was heard."""
+        for sentence in _sentences(" ".join(str(text or "").split())):
+            self._process_sentence(sentence)
+
+    def _me_called(self, text) -> bool:
+        check = getattr(self.detector, "is_addressed", None)
+        if callable(check):
+            return bool(check(text))
+        return bool(self.detector.is_name_mentioned(text) or self.detector.is_roll_mentioned(text))
+
+    def _log_class_question(self, question, to_me=False, answer=""):
+        recorder = getattr(self, "recorder", None)
+        if recorder is not None and hasattr(recorder, "add_question"):
+            try:
+                recorder.add_question(question, to_me=to_me, answer=answer)
+            except Exception as e:
+                logger.debug(f"[Meet] Could not remember class question: {e!r}")
 
     async def _auto_sign_in(self):
         account  = self.config.get("google_account", {})
@@ -615,7 +655,10 @@ class MeetHandler:
         # Read chat
         chat = await self._read_chat()
         if chat:
-            logger.info(f"[Meet] Chat({len(chat)}): {str(chat[-2:])[:120]}")
+            signature = (len(chat), chat[-1])
+            if signature != self._last_chat_log:      # log only when a new message arrives
+                self._last_chat_log = signature
+                logger.info(f"[Meet] Chat({len(chat)}): {str(chat[-1])[:120]}")
             self._check_for_addressed_chat_questions(chat)
 
         # Caption-based detection — pass raw caption directly (not joined deque)
@@ -650,26 +693,42 @@ class MeetHandler:
             if not delta.strip():
                 continue
 
-            addressed = (
-                self.detector.is_name_mentioned(text)
-                or self.detector.is_roll_mentioned(text)
-            )
-            question = bool(_QUESTION_CUE.search(text))
+            for sentence in _sentences(text)[-2:]:
+                self._process_sentence(sentence)
+
+    def _process_sentence(self, sentence):
+        """Answer ONLY when I am called by full name / roll number.
+
+        Every question heard in class is remembered for the notes, but a question put to
+        another student is never answered.
+        """
+        now = _time.time()
+        memory = self.__dict__.setdefault("_question_memory", [])
+        memory[:] = [(t, q) for t, q in memory if now - t < 240][-8:]
+        sentence = " ".join(str(sentence or "").split())
+        if not sentence:
+            return
+        addressed = self._me_called(sentence)
+        has_wh = bool(_WH_WORD.search(sentence))
+        prompt_like = bool(_ANSWER_PROMPT.search(sentence) or _CALL_ON.search(sentence))
+        real_question = (bool(_QUESTION_CUE.search(sentence)) and (has_wh or len(sentence.split()) >= 5)
+                         and (has_wh or not prompt_like))
+        if real_question and all(q != sentence for _, q in memory):
+            memory.append((now, sentence))
+            self._log_class_question(sentence)           # remembered for the notes only
+        if addressed:
+            self._pending_name_at = now
+            if real_question:
+                question = sentence
+            elif prompt_like and memory:                 # "Saad Naeem, you answer"
+                question = memory[-1][1]
+            else:
+                question = ""                            # just a roll call / name mention
             if question:
-                previous_question = self._pending_live_question
-                self._pending_live_question = text.strip()
-                self._pending_live_question_at = now
-                if addressed or self._pending_name_at:
-                    selected_question = (
-                        previous_question
-                        if addressed and previous_question and _ANSWER_PROMPT.search(text)
-                        else self._pending_live_question
-                    )
-                    self._queue_live_answer(selected_question)
-            elif addressed:
-                self._pending_name_at = now
-                if self._pending_live_question:
-                    self._queue_live_answer(self._pending_live_question)
+                self._queue_live_answer(question)
+        elif real_question and self._pending_name_at and now - self._pending_name_at <= 20:
+            self._pending_name_at = 0.0                  # question right after my name was called
+            self._queue_live_answer(sentence)
 
     def _check_for_addressed_chat_questions(self, messages):
         for message in messages:
@@ -677,10 +736,7 @@ class MeetHandler:
             if not normalized or normalized in self._seen_chat_message_set:
                 continue
             self._remember_chat_message(normalized)
-            addressed = (
-                self.detector.is_name_mentioned(normalized)
-                or self.detector.is_roll_mentioned(normalized)
-            )
+            addressed = self._me_called(normalized)
             if addressed and _QUESTION_CUE.search(normalized):
                 self._queue_live_answer(message)
 
@@ -698,6 +754,7 @@ class MeetHandler:
             logger.info("[Meet] A live question is already being answered; skipping duplicate.")
             return
         self._last_queued_question = normalized
+        self._log_class_question(question, to_me=True)
         self._pending_live_question = ""
         self._pending_live_question_at = 0.0
         self._pending_name_at = 0.0
@@ -718,7 +775,7 @@ class MeetHandler:
             context = "\n".join(self.captions)
         try:
             answer = await asyncio.to_thread(
-                ai_notes.answer_question, self.config, context, question
+                ai_notes.answer_question, self.config, context, question, None, True
             )
             if not answer:
                 logger.warning("[Meet] The AI provider could not answer the live question.")
@@ -727,6 +784,8 @@ class MeetHandler:
                 answer = answer[:1597].rsplit(" ", 1)[0] + "..."
             if not await self.send_chat(answer):
                 logger.error("[Meet] Could not send the live question answer to meeting chat.")
+            else:
+                self._log_class_question(question, to_me=True, answer=answer)
         except Exception as e:
             logger.error(f"[Meet] Live question answering failed: {e}")
 
@@ -734,26 +793,97 @@ class MeetHandler:
         text = " ".join(self.captions).lower()
         return any(n.lower() in text for n in self.student["urdu_names"])
 
+    _END_PHRASES = (
+        "the meeting has ended", "this meeting has ended", "meeting has ended",
+        "host ended the meeting", "your host ended the meeting for everyone",
+        "you've been removed from the meeting", "you were removed from the meeting",
+        "you've left the meeting", "you left the meeting", "call ended",
+        "returning to home screen", "ended the meeting for everyone",
+        "return to home screen", "submit feedback", "how was the audio and video",
+        "میٹنگ ختم ہو گئی",
+    )
+    # lobby / reconnect screens where the call controls are missing but the class is NOT over
+    _WAITING = re.compile(
+        r"asking to be let in|ask to join|someone will let you in|waiting for the host|"
+        r"let you in soon|joining\.\.\.|reconnecting|trying to reconnect|you.re offline",
+        re.IGNORECASE,
+    )
+
     async def is_meeting_ended(self) -> bool:
-        """
-        Returns True when meeting is fully ended for everyone.
-        """
+        """True as soon as the class is over, whatever the scheduled duration is:
+        the host ended it, the bot was removed, the call page closed, or the bot has been
+        alone for `end_when_alone_secs` after the lecture had really started."""
+        now = _time.time()
+        if now - self._end_checked_at < 2:           # cheap: look at the page every 2 s
+            return bool(self.end_reason)
+        self._end_checked_at = now
+        if self.end_reason:
+            return True
         try:
-            # End screen detection
-            phrases = [
-                "The meeting has ended",
-                "meeting has ended",
-                "میٹنگ ختم ہو گئی",
-                "Host ended the meeting",
-                "Your host ended the meeting for everyone",
-            ]
-            for phrase in phrases:
-                if await self.page.locator(f':has-text("{phrase}")').count() > 0:
-                    logger.info("[Meet] End screen detected.")
-                    return True
+            if self.page is None or self.page.is_closed():
+                self.end_reason = "meeting page closed"
+                return True
+            info = await self.page.evaluate(
+                """() => ({
+                    inCall: !!document.querySelector('[aria-label="Leave call"]'),
+                    text: (document.body ? document.body.innerText : '').toLowerCase().slice(0, 30000),
+                    url: location.href,
+                })"""
+            )
         except Exception as e:
             logger.debug(f"[Meet] Could not check for meeting end screen: {e!r}")
+            return False
+        if not isinstance(info, dict):
+            return False
+        text, url, in_call = info.get("text", ""), info.get("url", ""), bool(info.get("inCall"))
+        online = info.get("online", True) is not False
+        if in_call:
+            self._was_in_call = True
+
+        ended = weak = False
+        if not in_call and self._was_in_call and online:
+            # call controls are gone: end screen text, or we were sent back out of the meeting
+            on_end_screen = any(p in text for p in self._END_PHRASES)
+            left_meeting = bool(self._meeting_code) and self._meeting_code not in url.lower()
+            ended = on_end_screen or left_meeting
+            # No end text recognised (Google changed the wording / language)? Controls missing
+            # for several checks in a row on a non-lobby page still means the call is over.
+            weak = not ended and not self._WAITING.search(text)
+        self._end_hits = self._end_hits + 1 if ended else 0
+        self._weak_hits = self._weak_hits + 1 if weak else 0
+        if self._end_hits >= 2 or self._weak_hits >= 4:   # a flicker can't end the class
+            self.end_reason = "host ended the meeting / bot left the call"
+            logger.info(f"[Meet] End of class detected ({self.end_reason}).")
+            return True
+
+        # Everyone (teacher included) left and only the bot remains -> class is over.
+        class_started = bool(self.recorder is not None and self.recorder.segments)
+        alone = in_call and ("you're the only one here" in text or "you are the only one here" in text)
+        if alone and class_started:
+            self._alone_since = self._alone_since or now
+            limit = float(self.settings.get("end_when_alone_secs", 120))
+            if now - self._alone_since >= limit:
+                self.end_reason = "everyone left the meeting"
+                logger.info(f"[Meet] Bot has been alone for {int(limit)}s after class — ending.")
+                return True
+        else:
+            self._alone_since = 0.0
         return False
+
+    def stop_audio(self):
+        """Stop local transcription and save whatever it already heard (called as class ends)."""
+        if self.whisper is not None:
+            try:
+                self.whisper.stop()
+            except Exception as e:
+                logger.warning(f"[Meet] Could not stop local transcription cleanly: {e}")
+            self.whisper = None
+        try:
+            self._record_whisper_transcripts()
+        except Exception as e:
+            logger.debug(f"[Meet] Could not save final audio transcripts: {e!r}")
+        if self.recorder is not None:
+            self.recorder.flush()
 
     async def screenshot(self, path: str):
         try:
@@ -763,8 +893,7 @@ class MeetHandler:
             pass
 
     async def leave(self):
-        if self.whisper is not None:
-            self.whisper.stop()
+        self.stop_audio()
         try:
             btn = self.page.locator('[aria-label="Leave call"]').first
             if await btn.count() > 0:

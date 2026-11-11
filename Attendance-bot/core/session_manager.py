@@ -4,7 +4,8 @@ Session Manager — orchestrates joining, monitoring, and leaving.
 Timing rules (all relative to scheduled class time in JSON):
 1. Join 2 min after scheduled start
 2. Keep trying to join for up to 20 min from scheduled start
-3. Leave at: scheduled_end + 5 min (or +7 min after attendance detected)
+3. Leave at: scheduled_end + 5 min, OR as soon as the class really ends (host ends the
+   meeting / everyone leaves) — the notes are generated right away in both cases
 4. Rejoin if host ends early, until class_end + 5 min
 """
 
@@ -27,6 +28,17 @@ PKT = ZoneInfo("Asia/Karachi")
 
 
 class SessionManager:
+    _live_sessions = 0          # classes currently being attended (shared by all sessions)
+    _notes_tasks: set = set()   # notes still being written in the background
+
+    @classmethod
+    async def wait_all_notes(cls, timeout: float = 1200):
+        """Wait for notes of every finished class (used on shutdown / test mode)."""
+        pending = [t for t in cls._notes_tasks if not t.done()]
+        if pending:
+            logger.info(f"Waiting for {len(pending)} notes job(s) to finish...")
+            await asyncio.wait(pending, timeout=timeout)
+
     def __init__(self, config: Dict):
         self.config      = config
         self.settings    = config["global_settings"]
@@ -55,21 +67,42 @@ class SessionManager:
             self.state.set_idle()
             return None
         if self._notes_task is None:
-            self.state.set_status("generating_notes")
+            if SessionManager._live_sessions <= 1:      # don't hide a class that is running
+                self.state.set_status("generating_notes")
             self._notes_task = asyncio.create_task(self._finalize_notes(self.current_recorder))
+            SessionManager._notes_tasks.add(self._notes_task)
+            self._notes_task.add_done_callback(SessionManager._notes_tasks.discard)
         return self._notes_task
 
     async def _finalize_notes(self, recorder):
         try:
-            done = await asyncio.wait_for(recorder.finalize(), timeout=600)
+            try:
+                done = await asyncio.wait_for(recorder.finalize(), timeout=1200)
+            except asyncio.TimeoutError:
+                raise
+            except Exception as first:        # one automatic retry (network blips, API hiccups)
+                logger.warning(f"[{recorder.subject}] Notes failed ({first}); retrying in 30 s.")
+                await asyncio.sleep(30)
+                done = await asyncio.wait_for(recorder.finalize(), timeout=1200)
             if done:
                 self.state.update("last_notes", str(done))
+                tg = getattr(self, "tg", None)
+                if tg is not None:
+                    tg.notes_ready(recorder.cls, str(done))
         except Exception as e:
             logger.error(f"[{recorder.subject}] Could not finish notes: {e}")
         finally:
-            self.state.set_idle()
+            if SessionManager._live_sessions == 0:      # a newer class may already be running
+                self.state.set_idle()
 
     async def attend(self, cls: Dict, is_last: bool = True):
+        SessionManager._live_sessions += 1
+        try:
+            await self._attend(cls, is_last)
+        finally:
+            SessionManager._live_sessions = max(0, SessionManager._live_sessions - 1)
+
+    async def _attend(self, cls: Dict, is_last: bool = True):
         platform = cls["platform"]
         subject  = cls["subject"]
 
@@ -158,19 +191,35 @@ class SessionManager:
             self.tg.error(cls, str(e))
         finally:
             duration_secs = int(time.time() - session_start)
+            # Class is over (early or on time): freeze the recording and start the notes NOW,
+            # in parallel with leaving the call, instead of waiting for the scheduled end.
+            stop_audio = getattr(handler, "stop_audio", None)
+            if callable(stop_audio):
+                try:
+                    await asyncio.to_thread(stop_audio)
+                except Exception as e:
+                    logger.warning(f"[{subject}] Could not stop audio capture cleanly: {e}")
+            notes_task = self.start_notes_finalization()
+            if notes_task is not None:
+                now = datetime.now(PKT)
+                early = int((hard_end - now).total_seconds() // 60) - 5
+                why = getattr(handler, "end_reason", "") or "scheduled end time"
+                logger.info(
+                    f"[{subject}] Class over at {now:%H:%M} ({why}"
+                    + (f", {early} min before schedule" if early > 0 else "")
+                    + ") — generating notes now."
+                )
+                await asyncio.sleep(0)
             try:
                 await handler.leave()
             except Exception as e:
                 logger.error(f"[{subject}] Could not leave meeting cleanly: {e}")
             self.current_handler = None
-            notes_task = self.start_notes_finalization()
-            if notes_task is not None:
-                await asyncio.sleep(0)
-            self.tg.left(cls, "end_time")
+            self.tg.left(cls, "host_ended" if getattr(handler, "end_reason", "") else "end_time")
             self.tg.class_summary(cls, self.state.get("attendance_marked"), duration_secs)
             self.att_logger.log_session(cls, marked=bool(self.state.get("attendance_marked")))
-            if notes_task is not None:
-                await asyncio.shield(notes_task)
+            # Notes keep generating in the background so the NEXT class (even 10 min later)
+            # is joined on time; shutdown waits for them via wait_all_notes().
             logger.info(f"[{subject}] Session ended.")
 
     async def _monitor_with_rejoin(self, handler, cls: Dict, hard_end: datetime):

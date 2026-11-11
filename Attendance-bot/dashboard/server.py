@@ -246,6 +246,25 @@ def notes_chat(folder):
     return jsonify(answer=answer)
 
 
+@app.post("/notes/<path:folder>/regenerate")
+def notes_regenerate_route(folder):
+    import asyncio
+    from utils import notes_regenerate
+    directory = _note_directory(folder)
+    config = config_store.load_raw()
+    if not ai_notes.api_key(config):
+        return jsonify(error="Add an AI provider key in Dashboard -> Settings first."), 503
+    body = _body()
+    prompt = str(body.get("prompt") or "").strip()[:600] if isinstance(body, dict) else ""
+    try:
+        ok = asyncio.run(notes_regenerate.regenerate(directory, config, prompt))
+    except Exception as e:
+        return jsonify(error=f"Could not regenerate the notes: {e}"), 500
+    if not ok:
+        return jsonify(error="The AI could not write the notes. Check the key and limits in the log, then try again."), 502
+    return jsonify(ok=True)
+
+
 class DashboardServer:
     def __init__(self, config=None):
         d = (config or {}).get("dashboard", {})

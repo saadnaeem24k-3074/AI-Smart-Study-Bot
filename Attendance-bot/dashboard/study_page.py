@@ -11,12 +11,12 @@ _TEMPLATE = r"""<!doctype html>
 <meta name="color-scheme" content="light dark">
 <title>__SUBJECT__ — Study notes</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#f3f4f6;--panel:#fff;--sunk:#eceef2;--line:#dde1e8;--ink:#14181f;--mute:#586170;--acc:#2447d6;--mark:#ffe14d;--bad:#c0392b;--e:cubic-bezier(.2,.7,.2,1);color-scheme:light}
 [data-theme=dark]{--bg:#0e1116;--panel:#161a21;--sunk:#1d222b;--line:#272d38;--ink:#e9ecf2;--mute:#9aa3b2;--acc:#8ba6ff;--mark:#6b5a0f;--bad:#ff8a7a;color-scheme:dark}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Hanken Grotesk","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
 button,textarea{font:inherit;color:inherit}button{cursor:pointer}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
@@ -73,6 +73,13 @@ textarea::placeholder{color:var(--mute)}
 .hint{max-width:760px;margin:6px auto 0;color:var(--mute);font-size:12px}
 @media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:42vh minmax(480px,1fr);height:auto;min-height:calc(100vh - 60px)}aside{border-left:0;border-top:1px solid var(--line)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+:root,[data-theme=light]{--bg:#faf9f5;--panel:#fff;--sunk:#f0eee6;--line:#e6e3d9;--ink:#1f1e1d;--mute:#73726c;--acc:#d97757;--mark:#f5e1a4}
+[data-theme=dark]{--bg:#262624;--panel:#1f1e1d;--sunk:#30302e;--line:rgba(255,255,255,.09);--ink:#faf9f5;--mute:#9c9a92;--acc:#d97757;--mark:#5c4a1f}
+h1,h2,.brand,.top h1{font-family:'Source Serif 4',Georgia,serif;font-weight:500}
+.rail{background:var(--panel)}.logo{background:var(--acc);color:#fff;border-radius:50%}
+button,input,select,textarea{border-radius:12px}
+textarea,input[type=text],input[type=password],select{background:var(--sunk);border:1px solid var(--line)}
 </style>
 </head>
 <body>

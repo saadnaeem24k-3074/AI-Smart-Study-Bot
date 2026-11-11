@@ -51,6 +51,11 @@ ROLL_ADDRESS_PATTERNS = [
 ]
 
 
+# English STT spellings of the full name ("Saad Naeem", "Sad Naim", "Saat Nayeem" ...)
+FULL_NAME_RE = re.compile(
+    r"(?<!\w)sa+[dt]\s+(?:na+[iy]?e*[mn]|nayeem|naeim|na\W?im|nayim|neem|nayem)(?!\w)", re.I)
+
+
 class AttendanceDetector:
     def __init__(self, config):
         self.student       = config["student"]
@@ -99,6 +104,27 @@ class AttendanceDetector:
                     return True
             elif name in t:
                 return True
+        return False
+
+    def is_addressed(self, text):
+        """True only when the teacher calls ME: full name or roll number.
+
+        A bare first name ("Saad") is ignored by default because other students may share it;
+        set student.respond_to_first_name = true in schedule.json to also accept it.
+        """
+        text = str(text or "")
+        if self.is_roll_mentioned(text):
+            return True
+        if FULL_NAME_RE.search(text):
+            return True
+        t = text.casefold()
+        full_names = [n for n in (*NAME_EXACT, *self._extra_names, str(self.student.get("name", "")).lower())
+                      if n and len(n.split()) >= 2]
+        if any(" ".join(n.casefold().split()) in " ".join(t.split()) for n in full_names):
+            return True
+        if self.student.get("respond_to_first_name"):
+            first = [n for n in (*NAME_EXACT, *self._extra_names) if n and len(n.split()) == 1]
+            return any(re.search(rf"(?<!\w){re.escape(n.casefold())}(?!\w)", t) for n in first)
         return False
 
     @staticmethod

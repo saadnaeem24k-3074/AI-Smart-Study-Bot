@@ -28,12 +28,24 @@ SIG_JS = """() => {
   const vids = [...document.querySelectorAll('video')]
       .filter(v => v.videoWidth > 0 && v.readyState >= 2);
   if (!vids.length) return null;
-  let best = null, area = 0;
+  const PRES = /\\(presentation\\)|\\bpresentation\\b|is presenting|\\bpresenting\\b|\\u067e\\u0631\\u06cc\\u0632\\u0646\\u0679\\u06cc\\u0634\\u0646/i;
+  // Meet labels the shared-screen tile "<name> (Presentation)": prefer that tile, any size.
+  const isPresTile = v => {
+    let el = v.parentElement;
+    for (let i = 0; i < 8 && el; i++, el = el.parentElement) {
+      const t = (el.innerText || '').trim();
+      if (t && t.length < 300 && PRES.test(t)) return true;
+    }
+    return false;
+  };
+  let best = null, area = 0, tile = false;
   for (const v of vids) {
     const r = v.getBoundingClientRect(), a = r.width * r.height;
-    if (a > area) { area = a; best = v; }
+    const p = isPresTile(v);
+    if (a < 80 * 80) continue;
+    if ((p && !tile) || (p === tile && a > area)) { best = v; area = a; tile = p; }
   }
-  if (!best || area < 120 * 120) return null;
+  if (!best) return null;
   window.__slideVideo = best;
   const W = 64, H = 36;
   const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -44,10 +56,10 @@ SIG_JS = """() => {
   for (let i = 0; i < d.length; i += 4)
     sig.push((d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0);
   const txt = (document.body.innerText || '').toLowerCase();
-  const presenting = /presentation|presenting|\u067e\u0631\u06cc\u0632\u0646\u0679\u06cc\u0634\u0646/.test(txt);
+  const presenting = tile || PRES.test(txt);
   const r = best.getBoundingClientRect();
-  const big = (area / (window.innerWidth * window.innerHeight)) > 0.30;
-  return { sig, presenting, big, w: best.videoWidth, h: best.videoHeight,
+  const big = tile || (area / (window.innerWidth * window.innerHeight)) > 0.25;
+  return { sig, presenting, big, tile, w: best.videoWidth, h: best.videoHeight,
            x: r.x, y: r.y, rw: r.width, rh: r.height };
 }"""
 
@@ -107,7 +119,7 @@ class SlideCapture:
         if not info or not info.get("sig"):
             self._reset_motion()
             return False
-        if self.mode == "auto" and not (info["presenting"] and info["big"]):
+        if self.mode == "auto" and not (info.get("tile") or (info["presenting"] and info["big"])):
             self._reset_motion()
             return False
 

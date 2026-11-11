@@ -8,6 +8,8 @@ keeps the raw transcript.
 """
 
 import asyncio
+import copy
+import re
 import json
 import re
 import time
@@ -22,9 +24,10 @@ logger = setup_logger("AINotes")
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 # max transcript characters per provider (DeepSeek has a 128K-token window; Urdu is token-hungry)
-MAX_CHARS = {"anthropic": 120_000, "deepseek": 60_000, "gemini": 300_000}
+MAX_CHARS = {"anthropic": 120_000, "deepseek": 60_000, "gemini": 300_000, "groq": 30_000}
 
 _LANG_RULE = {
     "English": "clear English",
@@ -59,7 +62,7 @@ def _limit(config: Dict) -> int:
 def _post(url: str, headers: Dict, body: Dict, who: str) -> Optional[Dict]:
     for attempt in range(2):
         try:
-            r = requests.post(url, headers=headers, data=json.dumps(body), timeout=180)
+            r = requests.post(url, headers=headers, data=json.dumps(body), timeout=300)
             break
         except requests.RequestException as e:
             if attempt == 0:
@@ -89,13 +92,13 @@ def _call(config: Dict, user: str, max_tokens: int, system: Optional[str] = None
     model = config_store.ai_model(config)
     system = system or _system(config)
 
-    if prov == "deepseek":                      # OpenAI-compatible
-        data = _post(DEEPSEEK_URL,
+    if prov in ("deepseek", "groq"):                      # OpenAI-compatible
+        data = _post(GROQ_URL if prov == "groq" else DEEPSEEK_URL,
                      {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                      {"model": model, "temperature": 0.3, "max_tokens": min(max_tokens, 8000),
                       "response_format": {"type": "json_object"},
                       "messages": [{"role": "system", "content": system},
-                                   {"role": "user", "content": user}]}, "DeepSeek")
+                                   {"role": "user", "content": user}]}, prov.title())
         try:
             return data["choices"][0]["message"]["content"] if data else None
         except Exception:
@@ -176,19 +179,58 @@ def _concise_answer(text: str, max_lines: int = 4, max_words: int = 35) -> str:
     return "\n".join(result)
 
 
-async def summarize(config: Dict, transcript: str) -> Optional[Dict]:
+def _notes_config(config: Dict) -> Dict:
+    """Groq's free tier cannot take a whole lecture, so notes use Gemini when its key is saved."""
+    if config_store.ai_provider(config) == "groq" and config_store.ai_key(config, "gemini"):
+        config = copy.deepcopy(config)
+        config.setdefault("ai", {})["provider"] = "gemini"
+    return config
+
+
+_LIVE_STYLE = (
+    "You are a university student answering a question aloud in an online class by typing in the "
+    "meeting chat. Sound like a real, relaxed, polite student: first person, one or two short "
+    "sentences (about 25 words at most). Plain text only: no markdown, bullets, bold, headings, "
+    "numbered lists, citations, emojis or sign-off. Never say you are an AI and never mention "
+    "'the lecture material' or 'the transcript'. If unsure, give your best short answer with a "
+    "natural hedge like 'I think'. If several questions appear, answer the one the teacher asked "
+    "in class.\n\n"
+)
+
+
+def _humanize(text: str) -> str:
+    text = re.sub(r"[*_`#>]+", "", text)
+    text = re.sub(r"(?m)^\s*(?:[-\u2022]|\d+[.)])\s*", "", text)
+    text = re.sub(r"\[[^\]]*\d{1,2}:\d{2}[^\]]*\]", "", text)
+    return " ".join(text.split())
+
+
+async def summarize(config: Dict, transcript: str, extra: str = "") -> Optional[Dict]:
     """Turn a lecture transcript into structured, study-ready notes."""
+    config = _notes_config(config)
     detail = config_store.get_features(config).get("pdf_detail", "detailed")
+    prov = config_store.ai_provider(config)
     if detail == "concise":
         section_rules = "Create 3-6 focused sections, each with 2-4 concise bullets."
         max_tokens = 4500
     else:
         section_rules = (
-            "Create 5-10 well-organized sections with 3-6 useful bullets each. "
-            "Make these detailed but focused enough to study from. Include equations/formulas, "
-            "numbered sequences, and concrete worked examples when the transcript supports them."
+            "Create one section for EVERY distinct topic the teacher covered, in the order taught "
+            "(normally 10-20 sections for a full lecture; never merge unrelated topics to save space). "
+            "Each section needs a key_idea and 6-12 substantial bullets. Every bullet is 1-3 full "
+            "explanatory sentences that say what the idea is, why it matters and how it works, "
+            "including the teacher's own explanation, analogy, rule of thumb or warning. "
+            "Include every definition, formula (with each symbol explained), numbered procedure, "
+            "worked example, case study, comparison, question the teacher or a student asked in "
+            "class (with its answer), announcement and instruction. "
+            "COVERAGE RULE: these are study notes meant to replace re-watching the lecture, so "
+            "completeness beats brevity. Nothing the teacher taught may be left out, and the notes "
+            "must grow with the lecture length (a 30-minute lecture should produce at least "
+            "1,500 words of notes, a 60-minute lecture at least 3,000). Never reduce a topic to "
+            "one line, and never pad with anything the transcript does not support. "
         )
-        max_tokens = 7000
+        # Gemini 2.5 can return very long answers; the others are capped lower by their APIs.
+        max_tokens = 32000 if prov == "gemini" else 7800
     prompt = (
         "Transform this auto-caption transcript into accurate, useful study notes. "
         "Do not simply repeat or lightly edit the transcript. Organize concepts under "
@@ -200,7 +242,7 @@ async def summarize(config: Dict, transcript: str) -> Optional[Dict]:
         "advertisements, repeated fragments, and unrelated noise. "
         "Return JSON with exactly these keys:\n"
         '{"title": "short lecture title",\n'
-        ' "summary": ["2-5 concise sentences explaining the lecture and its main ideas"],\n'
+        ' "summary": ["4-8 sentences explaining the lecture, its flow and its main ideas"],\n'
         ' "sections": [{"heading": "concept heading", "key_idea": "central idea", '
         '"bullets": ["explained concept or step; define jargon on first use"], '
         '"steps": ["ordered phase or procedure, if applicable"], '
@@ -215,7 +257,7 @@ async def summarize(config: Dict, transcript: str) -> Optional[Dict]:
         ' "deadlines": [{"item": "what", "date": "when, as said"}],\n'
         ' "key_terms": [{"term": "important term or acronym", "definition": "short transcript-grounded definition"}],\n'
         ' "quiz": [{"q": "a self-test question about the lecture", "a": "its short answer"}]}\n'
-        f"{section_rules} Give up to 5 quiz questions (fewer for short lectures). "
+        f"{section_rules} Give up to 15 quiz questions (fewer for short lectures). "
         "Put an empty list where a category is unsupported. Keep mathematical notation "
         "readable and explain variables when the transcript provides that information. "
         "Diagrams are an important part of the study notes, not an optional extra. Add one "
@@ -228,8 +270,19 @@ async def summarize(config: Dict, transcript: str) -> Optional[Dict]:
         "component/architecture mapping (2-7 nodes). Do not invent a relationship just to "
         "fill the diagram field; leave it empty only when the transcript provides no clear "
         "visual relationship. "
+        "PROFESSIONAL FORMAT: write the notes as a polished university lecture handout. Use a formal, "
+        "neutral academic tone (no slang, filler, emojis, jokes or first-person phrasing such as "
+        "'the teacher said I should'; write 'the instructor explains' or state the fact directly). "
+        "Headings are short Title-Case noun phrases (max 8 words) and follow the order of the lecture. "
+        "Each key_idea is one precise sentence. Bullets are complete sentences with parallel "
+        "structure, start with the concept name where possible, and use consistent terminology "
+        "throughout; define an acronym once as 'Full Name (ACR)' then use ACR. Put formulas in "
+        "plain text (e.g. F = m * a) with symbols explained. No markdown symbols (#, *, backticks), "
+        "no numbering inside strings, no duplicated content between sections, summary, emphasis "
+        "and key_terms. The title is a concise professional lecture title (no date, no 'Lecture notes'). "
         "Write all note content in the configured notes language. Output JSON only.\n\n"
-        "TRANSCRIPT:\n" + _clip(transcript, _limit(config))
+        + (("STUDENT'S EXTRA INSTRUCTIONS (use only to adjust focus or format):\n" + extra[:600] + "\n\n") if extra else "")
+        + "TRANSCRIPT:\n" + _clip(transcript, _limit(config))
     )
     data = _parse_json(await asyncio.to_thread(_call, config, prompt, max_tokens))
     if not isinstance(data, dict):
@@ -246,7 +299,7 @@ async def summarize(config: Dict, transcript: str) -> Optional[Dict]:
     }
 
 
-def answer_question(config: Dict, context: str, question: str, history: Optional[List[Dict]] = None) -> Optional[str]:
+def answer_question(config: Dict, context: str, question: str, history: Optional[List[Dict]] = None, live: bool = False) -> Optional[str]:
     """Answer a study question, preferring lecture material but using general knowledge too."""
     if not api_key(config):
         return None
@@ -291,15 +344,20 @@ def answer_question(config: Dict, context: str, question: str, history: Optional
         "and 35 words. Write in "
         f"{lang}. Return only valid JSON with an answer field."
     )
+    if live:
+        prompt = _LIVE_STYLE + prompt
     data = _parse_json(_call(config, prompt, 1400, system=system))
     if not isinstance(data, dict):
         return None
     answer = data.get("answer")
-    return _concise_answer(answer.strip()) if isinstance(answer, str) and answer.strip() else None
+    if not (isinstance(answer, str) and answer.strip()):
+        return None
+    return _humanize(answer) if live else _concise_answer(answer.strip())
 
 
 async def correct_transcript(config: Dict, segments: List[Dict]) -> Optional[List[Dict]]:
     """Conservatively correct caption text while preserving every segment and its speaker/time."""
+    config = _notes_config(config)
     if not segments:
         return []
 
@@ -511,22 +569,52 @@ def _normalize_quiz(value) -> List[Dict[str, str]]:
     ]
 
 
+async def answer_class_questions(config: Dict, transcript: str, questions: List[str]) -> List[str]:
+    """Short answers (same order) to the questions asked in class; "" where unavailable."""
+    config = _notes_config(config)
+    questions = [q for q in questions if q.strip()][:25]
+    if not questions or not api_key(config):
+        return [""] * len(questions)
+    prompt = (
+        "These questions were asked during a lecture (auto-captions, may be slightly garbled). "
+        "For each, write a concise, accurate answer of 1-3 formal sentences. Prefer what the "
+        "lecture transcript says; if the lecture does not answer it, give the standard textbook "
+        "answer. No markdown, no first person. Return JSON only: "
+        '{"answers": ["answer to question 1", "answer to question 2"]} with exactly '
+        f"{len(questions)} answers in the same order.\n\nQUESTIONS:\n"
+        + "\n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
+        + "\n\nTRANSCRIPT:\n" + _clip(transcript, min(_limit(config), 60000))
+    )
+    try:
+        data = _parse_json(await asyncio.to_thread(_call, config, prompt, 6000))
+    except Exception as e:
+        logger.warning(f"Could not answer class questions: {e}")
+        return [""] * len(questions)
+    answers = data.get("answers") if isinstance(data, dict) else None
+    if not isinstance(answers, list):
+        return [""] * len(questions)
+    out = [str(a or "").strip() for a in answers][:len(questions)]
+    return out + [""] * (len(questions) - len(out))
+
+
 async def slide_notes(config: Dict, slides_text: Dict[int, str]) -> Dict[int, Dict]:
     """slides_text {n: raw captions} → {n: {"takeaway": str, "bullets": [..]}} ({} on failure)."""
+    config = _notes_config(config)
     items = [{"slide": n, "captions": t[:1500]} for n, t in sorted(slides_text.items()) if t.strip()]
     if not items:
         return {}
     prompt = (
         "Below are the captions spoken while each slide (or screen snapshot) was on screen. "
         "For each one write: a single-sentence 'takeaway' (the one thing to remember) and "
-        "2-5 clear bullet-point notes on what the teacher explained. Use complete, readable "
-        "sentences; never quote garbled fragments or begin/end mid-sentence. If the captions "
+        "3-6 clear, detailed bullet-point notes on what the teacher explained (cover definitions, "
+        "reasoning, examples and any warnings or exam hints). Use complete, readable "
+        "sentences in a formal, professional academic tone (no filler or first person); never quote garbled fragments or begin/end mid-sentence. If the captions "
         "for a slide are noisy, fragmentary or empty, omit them and return an empty takeaway "
         "and empty bullets.\n"
         'Return JSON: {"slides": [{"slide": 1, "takeaway": "...", "bullets": ["..."]}]}\n\n'
         + json.dumps(items, ensure_ascii=False)[:_limit(config)]
     )
-    data = _parse_json(await asyncio.to_thread(_call, config, prompt, 4500))
+    data = _parse_json(await asyncio.to_thread(_call, config, prompt, 8000))
     out: Dict[int, Dict] = {}
     if isinstance(data, dict):
         for s in data.get("slides", []):

@@ -44,6 +44,7 @@ DEFAULT_FEATURES = {
 PROVIDERS = {
     "anthropic": {"label": "Anthropic (Claude)", "model": "claude-sonnet-5-5", "env": "ANTHROPIC_API_KEY"},
     "deepseek":  {"label": "DeepSeek",           "model": "deepseek-chat",     "env": "DEEPSEEK_API_KEY"},
+    "groq":      {"label": "Groq (free tier)",   "model": "openai/gpt-oss-120b", "env": "GROQ_API_KEY"},
     "gemini":    {"label": "Google Gemini",      "model": "gemini-2.5-flash",  "env": "GEMINI_API_KEY"},
 }
 CAPTION_LANGS = ("urdu", "english", "keep")

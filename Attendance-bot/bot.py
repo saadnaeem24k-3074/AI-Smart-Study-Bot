@@ -6,11 +6,15 @@
 
 import asyncio
 import sys
+import warnings
 import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+warnings.filterwarnings("ignore", message=".*data discontinuity.*")
+
 from core.scheduler import ClassScheduler
+from core.session_manager import SessionManager
 from core.config_loader import ConfigLoader
 from core import config_store
 from core.logger import setup_logger
@@ -57,6 +61,10 @@ class AttendanceBot:
             # Leave meeting first WHILE loop is still running
             await self._leave_active_meeting()
         finally:
+            try:
+                await SessionManager.wait_all_notes()
+            except BaseException:
+                pass
             self.tg.bot_stopped()
             logger.info("Bot stopped.")
 

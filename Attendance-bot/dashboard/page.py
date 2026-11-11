@@ -8,14 +8,14 @@ PAGE = r"""<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <title>Attendance Bot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#f3f4f6;--panel:#fff;--sunk:#eceef2;--line:#dde1e8;--ink:#14181f;--mute:#586170;--acc:#2447d6;--mark:#ffe14d;
 --ok:#12805c;--warn:#9a5b00;--bad:#c0392b;--e:cubic-bezier(.2,.7,.2,1);color-scheme:light}
 [data-theme=dark]{--bg:#0e1116;--panel:#161a21;--sunk:#1d222b;--line:#272d38;--ink:#e9ecf2;--mute:#9aa3b2;--acc:#8ba6ff;--mark:#6b5a0f;
 --ok:#4cd2a0;--warn:#f0b955;--bad:#ff8a7a;color-scheme:dark}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Hanken Grotesk","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .mono{font-family:"IBM Plex Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
@@ -140,6 +140,13 @@ dialog[open]{animation:pop .25s var(--e)}dialog::backdrop{background:rgba(10,12,
 .save{bottom:84px}#toast{bottom:90px}.card{padding:16px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+:root,[data-theme=light]{--bg:#faf9f5;--panel:#fff;--sunk:#f0eee6;--line:#e6e3d9;--ink:#1f1e1d;--mute:#73726c;--acc:#d97757;--mark:#f5e1a4}
+[data-theme=dark]{--bg:#262624;--panel:#1f1e1d;--sunk:#30302e;--line:rgba(255,255,255,.09);--ink:#faf9f5;--mute:#9c9a92;--acc:#d97757;--mark:#5c4a1f}
+h1,h2,.brand,.top h1{font-family:'Source Serif 4',Georgia,serif;font-weight:500}
+.rail{background:var(--panel)}.logo{background:var(--acc);color:#fff;border-radius:50%}
+button,input,select,textarea{border-radius:12px}
+textarea,input[type=text],input[type=password],select{background:var(--sunk);border:1px solid var(--line)}
 </style>
 </head>
 <body class="intro">
@@ -229,7 +236,7 @@ dialog[open]{animation:pop .25s var(--e)}dialog::backdrop{background:rgba(10,12,
       <label class="tog"><input type="checkbox" id="fAI"><span class="sw"></span><span><b>AI study notes</b><small>Organized summaries when a provider key is set.</small></span></label>
       <label class="tog"><input type="checkbox" id="fCalled"><span class="sw"></span><span><b>Name-call alert</b><small>Sound and popup when your name or roll number is called.</small></span></label>
       <label class="tog"><input type="checkbox" id="fSlides"><span class="sw"></span><span><b>Capture slides</b><small>Save presented slides and explain them in your notes.</small></span></label>
-      <label class="tog"><input type="checkbox" id="fWhisper"><span class="sw"></span><span><b>Local microphone and audio transcription</b><small>Whisper processes your default microphone and speaker playback locally; spoken questions can be answered in meeting chat.</small></span></label>
+      <label class="tog"><input type="checkbox" id="fWhisper"><span class="sw"></span><span><b>Microphone and audio transcription</b><small>Groq Whisper large-v3 when a Groq key is set, otherwise local Whisper, on your microphone and speaker playback; spoken questions can be answered in meeting chat.</small></span></label>
     </div>
     <div class="row" style="margin:16px 0 0">
       <div><label class="f" for="fCapLang">Teacher's caption language</label><select id="fCapLang"><option value="urdu">Urdu</option><option value="english">English</option><option value="keep">Keep Meet's setting</option></select></div>
@@ -244,7 +251,7 @@ dialog[open]{animation:pop .25s var(--e)}dialog::backdrop{background:rgba(10,12,
     <label class="tog"><input type="checkbox" id="fPdfTranscript"><span class="sw"></span><span><b>Append the full transcript to the PDF</b><small>The transcript is always saved separately too.</small></span></label>
   </div></div></div></section>
   <section class="acc card"><button class="acc-h" type="button" aria-expanded="false">AI provider<svg class="ic chev"><use href="#i-chev"/></svg></button><div class="acc-b"><div class="acc-i"><div class="pad">
-    <div class="row"><div><label class="f" for="aProv">Provider</label><select id="aProv"><option value="anthropic">Anthropic (Claude)</option><option value="deepseek">DeepSeek</option><option value="gemini">Google Gemini</option></select></div>
+    <div class="row"><div><label class="f" for="aProv">Provider</label><select id="aProv"><option value="anthropic">Anthropic (Claude)</option><option value="deepseek">DeepSeek</option><option value="gemini">Google Gemini</option><option value="groq">Groq (free tier)</option></select></div>
       <div><label class="f" for="aKey">API key</label><div style="display:flex;gap:8px"><input id="aKey" type="password" autocomplete="off" placeholder="Enter a key or keep the saved one"><button class="icb" id="keyEye" type="button" aria-label="Show or hide key"><svg class="ic"><use href="#i-eye"/></svg></button></div></div>
       <div><label class="f" for="aModel">Model (optional)</label><input id="aModel"></div></div>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><label class="tog" style="width:max-content"><input type="checkbox" id="aClear"><span class="sw"></span><span><b>Remove saved key</b></span></label>
@@ -398,10 +405,16 @@ function renderNotes(){
       <div class="nl">${n.pdf?`<a href="${noteUrl(n.folder,"notes.pdf")}" target="_blank" rel="noopener">${ic("doc")}PDF</a>`:(n.html?`<a href="${noteUrl(n.folder,"notes.html")}" target="_blank" rel="noopener">${ic("doc")}Notes</a>`:"")}
         ${(n.pdf||n.html)&&n.done?`<a href="${noteUrl(n.folder,"study")}" target="_blank" rel="noopener">${ic("chat")}Study chat</a>`:""}
         <a href="${noteUrl(n.folder,"transcript.md")}" target="_blank" rel="noopener">Transcript</a>
+        <a href="#" data-regen="${esc(n.folder)}" onclick="regen(this.dataset.regen);return false">Regenerate notes</a>
         ${n.corrected_transcript?`<a href="${noteUrl(n.folder,"transcript_corrected.md")}" target="_blank" rel="noopener">Corrected</a>`:""}</div>${n.done?"":'<span class="prog"></span>'}</article>`).join("")).join("")
     :'<div class="empty"><b>No matching notes</b>Finished lectures will appear here.</div>';}
 $("notesSearch").oninput=renderNotes;$("notesDate").onchange=renderNotes;
 
+async function regen(f){const say=m=>typeof toast==="function"?toast(m):alert(m);
+  const p=prompt("Optional: what should the notes focus on? (leave empty for standard notes)","");if(p===null)return;
+  say("Writing notes from the transcript - this can take a minute...");
+  try{const r=await fetch(noteUrl(f,"regenerate"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:p})});
+  const j=await r.json().catch(()=>({}));say(r.ok?"Notes are ready":(j.error||"Failed"));loadNotes();}catch(e){say("Failed: "+e)}}
 /* live state */
 const ST={joining:"Joining",in_class:"In class",generating_notes:"Making notes",waiting:"Waiting",idle:"Idle"};
 async function pollState(){

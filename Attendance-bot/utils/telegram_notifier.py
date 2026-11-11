@@ -23,6 +23,7 @@ Events notified:
 
 import requests
 import threading
+from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict
 from zoneinfo import ZoneInfo
@@ -226,6 +227,26 @@ class TelegramNotifier:
             f"━━━━━━━━━━━━━━━━\n"
             f"🕐 Stopped at: `{now}`"
         )
+
+    def notes_ready(self, cls: Dict, folder: str):
+        """Lecture notes finished."""
+        self._send(
+            f"📝 *Notes Ready*\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📖 Subject: `{cls.get('subject', 'Class')}`\n"
+            f"📁 Folder: `{folder}`"
+        )
+        pdf = Path(folder) / "notes.pdf"
+        if pdf.exists() and self.enabled and self.token and self.token != "YOUR_BOT_TOKEN_HERE":
+            threading.Thread(target=self._post_document, args=(pdf,), daemon=True).start()
+
+    def _post_document(self, path: Path):
+        try:
+            url = self._base_url.rsplit("/", 1)[0] + "/sendDocument"
+            with open(path, "rb") as f:
+                requests.post(url, data={"chat_id": self.chat_id}, files={"document": f}, timeout=120)
+        except Exception:
+            pass
 
     # ──────────────────────────────────────────────
     # Internal helpers

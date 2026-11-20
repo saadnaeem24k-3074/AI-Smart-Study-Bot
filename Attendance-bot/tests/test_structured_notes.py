@@ -206,7 +206,9 @@ class StudyNotesPdfTests(unittest.TestCase):
     def test_pdf_html_renders_ai_notes_and_omits_transcript_by_default(self):
         rendered = pdf_builder.build_html(self.context)
 
-        self.assertIn("Organized study notes", rendered)
+        self.assertIn("LECTURE STUDY NOTES", rendered)
+        self.assertNotIn("speaker(s)", rendered)           # no word / speaker statistics any more
+        self.assertNotIn("class=chip", rendered)
         self.assertIn("Finding the slope", rendered)
         self.assertIn("m = (y2 - y1) / (x2 - x1)", rendered)
         self.assertNotIn("Full transcript", rendered)
@@ -277,7 +279,7 @@ class StudyNotesPdfTests(unittest.TestCase):
 
         self.assertIn("<h1 dir=\"auto\">Slope and equations of lines</h1>", rendered)
         self.assertIn("24 October 2026", rendered)
-        self.assertIn("1 flagged moment", rendered)
+        self.assertNotIn("flagged moment", rendered)       # stats line removed from the cover
         self.assertEqual(rendered.count("Remember that slope measures the rate"), 1)
         self.assertEqual(rendered.count("Exam / paper"), 1)
 
@@ -340,12 +342,13 @@ class StudyNotesPdfTests(unittest.TestCase):
 
         rendered = pdf_builder.build_html(context)
 
-        self.assertEqual(rendered.count("1 flagged moment"), 1)
+        self.assertNotIn("flagged moment", rendered)
         self.assertIn("08:23", rendered)
         self.assertIn("<q>Remember the slope formula for the exam.</q>", rendered)
-        self.assertIn("<h2>Key takeaways</h2>", rendered)
+        self.assertIn("Stressed in class", rendered)
+        self.assertIn("Practice with points that have different coordinates.", rendered)
         self.assertEqual(rendered.count("Remember the slope formula for the exam."), 1)
-        self.assertLess(rendered.index("Key moments"), rendered.index("Organized study notes"))
+        self.assertLess(rendered.index("Key moments"), rendered.index("Finding the slope"))
         self.assertNotIn("<h4>Steps</h4>", rendered)
 
     def test_visual_notes_glossary_quiz_and_quick_reference_layout(self):
@@ -379,7 +382,7 @@ class StudyNotesPdfTests(unittest.TestCase):
 
         rendered = pdf_builder.build_html(context)
 
-        self.assertIn('<div class="flow">', rendered)
+        self.assertIn('class="flow process"', rendered)
         self.assertIn("Unit</span>", rendered)
         self.assertNotIn("1. 1. Unit Testing", rendered)
         self.assertIn('<table class="glossary">', rendered)

@@ -23,6 +23,9 @@ class CallOnMeTests(unittest.TestCase):
         self.h._log_class_question = lambda *a, **k: None
         self.h._process_sentence = lambda s: mh.MeetHandler._process_sentence(self.h, s)
         self.h._me_called = lambda t: mh.MeetHandler._me_called(self.h, t)
+        self.h._is_recent_duplicate = lambda q, now: False
+        self.h._can_recall = lambda item, now: mh.MeetHandler._can_recall(self.h, item, now)
+        self.h._calls_someone_else = lambda s: mh.MeetHandler._calls_someone_else(self.h, s)
         self.say = lambda s: mh.MeetHandler._process_sentence(self.h, s)
 
     def test_silent_while_another_student_is_asked(self):

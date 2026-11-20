@@ -78,25 +78,31 @@ section.page:last-of-type { break-after: auto; }
 .glossary th { color: #047857; background: #ecfdf5; font-weight: 750; }
 .glossary tbody tr:nth-child(even) { background: #f8fafc; }
 .glossary td:first-child { width: 30%; color: #047857; font-weight: 750; }
-.diagram { margin: 11px 0; padding: 12px 14px; border: 1px solid #c7d2fe; border-radius: 11px;
+.diagram { margin: 16px 0; padding: 16px 20px 18px; border: 1px solid #c7d2fe; border-radius: 11px;
   background: linear-gradient(135deg, #f8faff, #f0fdfa); break-inside: avoid;
   box-shadow: 0 2px 8px rgba(49, 46, 129, .07); }
-.diagram-title { margin-bottom: 10px; color: #4338ca; font-size: 8pt; font-weight: 800;
+.diagram-title { margin-bottom: 14px; color: #4338ca; font-size: 8pt; font-weight: 800;
   letter-spacing: .08em; text-transform: uppercase; }
-.flow { display: flex; align-items: stretch; justify-content: center; gap: 7px; flex-wrap: wrap; }
-.flow-node { flex: 1 1 105px; display: flex; align-items: center; justify-content: center; min-height: 42px;
-  padding: 7px 9px; border: 1px solid #c7d2fe; border-radius: 8px; background: #fff;
-  color: #3730a3; text-align: center; font-weight: 700; box-shadow: 0 1px 3px rgba(49, 46, 129, .08); }
-.flow-arrow { align-self: center; color: #7c3aed; font-size: 13pt; font-weight: 900; }
-.tree-root { width: fit-content; margin: 0 auto 11px; padding: 7px 14px; border-radius: 8px;
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px 18px;
+  counter-reset: step; }
+.flow-node { position: relative; display: flex; align-items: center; justify-content: center; min-height: 48px;
+  padding: 10px 14px 10px 38px; border: 1px solid #c7d2fe; border-radius: 8px; background: #fff;
+  color: #3730a3; text-align: center; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere;
+  box-shadow: 0 1px 3px rgba(49, 46, 129, .08); }
+.flow-node::before { counter-increment: step; content: counter(step); position: absolute; left: 10px; top: 50%;
+  transform: translateY(-50%); width: 20px; height: 20px; border-radius: 50%; background: #312e81; color: #fff;
+  font-size: 8pt; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.flow.analogy .flow-node { padding-left: 14px; } .flow.analogy .flow-node::before { display: none; }
+.flow-arrow { display: none; }
+.tree-root { width: fit-content; max-width: 90%; margin: 0 auto 14px; padding: 9px 18px; border-radius: 8px;
   background: #312e81; color: white; text-align: center; font-weight: 750; }
-.tree-branches { display: flex; justify-content: center; gap: 8px; padding-top: 9px;
+.tree-branches { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; padding-top: 14px;
   border-top: 2px solid #a5b4fc; }
-.tree-branch { flex: 1; padding: 8px 10px; border-top: 3px solid #06b6d4; border-radius: 7px;
+.tree-branch { flex: 1 1 150px; min-width: 0; padding: 10px 14px; overflow-wrap: anywhere; border-top: 3px solid #06b6d4; border-radius: 7px;
   background: #ecfeff; text-align: center; font-weight: 700; }
-.tree-branch ul { margin: 4px 0 0; padding-left: 16px; color: #334155; text-align: left; font-weight: 400; }
-.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.compare-group { padding: 9px 11px; border: 1px solid #c7d2fe; border-radius: 8px;
+.tree-branch ul { margin: 6px 0 0; padding-left: 18px; color: #334155; text-align: left; font-weight: 400; }
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.compare-group { padding: 12px 15px; overflow-wrap: anywhere; border: 1px solid #c7d2fe; border-radius: 8px;
   background: #eef2ff; break-inside: avoid; }
 .compare-group:nth-child(2) { background: #ecfeff; }
 .compare-group:nth-child(3) { background: #f0fdf4; }
@@ -148,6 +154,12 @@ h2.pg { font-size: 15pt; margin-bottom: 3px; } .sub { color: #64748b; font-size:
 .qa { margin-bottom: 11px; break-inside: avoid; } .qa .q { font-weight: 700; } .qa .a { color: #047857; margin-top: 2px; }
 .selftest { margin-top: 14px; break-inside: avoid; }
 .quiz-card { break-inside: avoid; }
+.grid.dense { grid-template-columns: repeat(4, 1fr); gap: 9px; }
+.grid.dense5 { grid-template-columns: repeat(5, 1fr); gap: 7px; }
+.grid.dense .cap, .grid.dense5 .cap { padding: 3px 6px; font-size: 7.5pt; }
+h2.pg { break-after: avoid; }
+.cq { margin-top: 8px; } .cq .qa { margin-bottom: 13px; padding-bottom: 9px; border-bottom: 1px solid #e2e8f0; }
+.cq .src { color: #64748b; font-size: 8pt; font-weight: 400; }
 .tr h3 { font-size: 9.5pt; margin: 12px 0 4px; color: #4338ca; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
 .tr p { font-size: 8.8pt; margin-bottom: 3px; color: #1e293b; break-inside: avoid; }
 .tr .tm { color: #94a3b8; font-family: Consolas, monospace; font-size: 8pt; margin-right: 6px; }
@@ -156,32 +168,48 @@ h2.pg { font-size: 15pt; margin-bottom: 3px; } .sub { color: #64748b; font-size:
 .qa .a { margin-top: 5px; padding: 6px 9px; border-radius: 6px; background: #ecfdf5; }
 .qa .q { break-after: avoid; }
 
-body{font-family:"Times New Roman","Noto Serif",Georgia,serif;font-size:11pt;line-height:1.5;color:#000;counter-reset:sec}
-.hero{background:none !important;color:#000;border-radius:0;padding:0 0 12px;border-bottom:3px double #000;text-align:center}
-.kicker{opacity:1;letter-spacing:.3em}.when{opacity:1}.chips{justify-content:center}
-.chip{background:none;border:1px solid #000;border-radius:0;color:#000}
-.card{border:0 !important;border-radius:0;background:none !important;padding:0;margin-top:16px}
-.card h2,h2.pg{font-size:14pt;color:#000;text-transform:none;letter-spacing:0;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:8px}
-.card h2::before,h2.pg::before{counter-increment:sec;content:counter(sec) ". "}
+body{font-family:"Liberation Sans","DejaVu Sans",Arial,Helvetica,sans-serif;font-size:10.3pt;line-height:1.5;color:#1a1a1a}
+.hero{background:none !important;color:#1a1a1a;border-radius:0;padding:0 0 12px;border-bottom:3px solid #5b1a3a;text-align:left}
+.kicker{opacity:1;letter-spacing:.22em;color:#5b1a3a;font-size:9pt;font-weight:700}
+.hero h1{color:#5b1a3a;font-size:25pt;line-height:1.15;margin:6px 0 4px}
+.hero .subtitle{font-size:12pt;color:#333;margin:2px 0 6px}
+.when{opacity:1;color:#555;font-size:9.5pt}
+.card{border:0 !important;border-radius:0;background:none !important;padding:0;margin-top:14px}
+.card h2,h2.pg{font-size:15pt;color:#5b1a3a;text-transform:none;letter-spacing:0;border-bottom:2px solid #5b1a3a;padding-bottom:3px;margin:0 0 8px}
 .notes-start{counter-reset:sub}
-.card.lecture{margin-top:18px;break-inside:auto !important}.card.lecture h3{color:#000;font-size:12.5pt;border-bottom:1px solid #000}
+.card.lecture{margin-top:20px;break-inside:auto !important;counter-reset:subsec}
+.card.lecture h3{color:#5b1a3a;font-size:15pt;line-height:1.25;border-bottom:2px solid #5b1a3a;padding-bottom:3px;margin:0 0 8px}
 .card.lecture h3::before{counter-increment:sub;content:counter(sub) ". "}
-.card.lecture h4,.notes h3{color:#000;letter-spacing:0}.section-icon{display:none}
-.key-idea{background:#fff;border:1px solid #000;border-left:5px solid #000;border-radius:0;color:#000}
-.formula{background:#fff;border:1px solid #000;border-radius:0}
-.examples{background:#fff;border:1px dashed #000;border-radius:0}.examples h4,.example{color:#000 !important}
-.glossary{border:1px solid #000}.glossary th{background:#000;color:#fff}
-.glossary th,.glossary td{border:1px solid #000}.glossary td:first-child{color:#000}
-.glossary tbody tr:nth-child(even){background:#f2f2f2}
-ol.num li::before{background:#000;border-radius:0}ul.check li::before{border-color:#000;border-radius:0}
-.pill{background:#000 !important;border-radius:0}.flag .t,.sub,.sm,.tm,.sp{color:#333}
-.tl{filter:grayscale(1)}.thumb{border:1px solid #000;border-radius:0}.thumb .cap b{color:#000}
-.slide .num{background:#000 !important;border-radius:0}.slide img{border:1px solid #000;border-radius:0;box-shadow:none}
-.take{background:#f2f2f2;border-left:5px solid #000;border-radius:0}.take small{color:#000}
-.raw{background:#f2f2f2;border-left:3px solid #000;border-radius:0}
-.qa,.qa .a{background:none;border:1px solid #000;border-radius:0}.qa .a{border:0;border-top:1px dashed #000;border-radius:0}
-.quickref{background:none;border:1px solid #000;border-radius:0}.quickref h2{color:#000}.quickref-item{background:none;border:1px solid #000;border-radius:0}.quickref-item b{color:#000}
-.hint{background:#f2f2f2;border-radius:0;color:#000}.tr h3{color:#000;border-bottom:1px solid #000}
+.card.lecture h4,.notes h3{color:#5b1a3a;letter-spacing:0}.section-icon{display:none}
+.subsec h4{color:#5b1a3a;font-size:11.5pt;margin:12px 0 4px;break-after:avoid}
+.subsec h4::before{counter-increment:subsec;content:counter(sub) "." counter(subsec) "  "}
+.para{margin:0 0 7px}
+.tbl{width:100%;border-collapse:collapse;font-size:9.4pt;margin:8px 0}
+.tbl th{background:#5b1a3a;color:#fff;text-align:left;padding:5px 8px;border:1px solid #5b1a3a}
+.tbl td{padding:5px 8px;border:1px solid #cdb7c3;vertical-align:top}
+.tbl tbody tr:nth-child(even){background:#f7eff3}.tbl tr{break-inside:avoid}
+.tbl-title{font-weight:700;color:#5b1a3a;margin:8px 0 2px;break-after:avoid}
+.callout{border-left:4px solid #5b1a3a;background:#f7eff3;padding:6px 10px;margin:8px 0;break-inside:avoid}
+.callout b{color:#5b1a3a}
+.worked{border:1px solid #cdb7c3;border-left:4px solid #5b1a3a;padding:7px 11px;margin:9px 0;break-inside:avoid}
+.worked h4{color:#5b1a3a !important;margin:0 0 4px !important}
+.qh{color:#5b1a3a;font-size:12pt;margin:14px 0 4px}
+.card.terms{padding:0}.card.terms h3{color:#5b1a3a;font-size:15pt;border-bottom:2px solid #5b1a3a;padding-bottom:3px;margin:0 0 8px}
+.key-idea{background:#f7eff3;border:0;border-left:4px solid #5b1a3a;border-radius:0;color:#1a1a1a}
+.formula{background:#f4f4f4;border:0;border-left:3px solid #5b1a3a;border-radius:0}
+.examples{background:#fff;border:1px solid #cdb7c3;border-left:4px solid #5b1a3a;border-radius:0}.examples h4{color:#5b1a3a !important}.example{color:#1a1a1a !important}
+.glossary{border:1px solid #5b1a3a}.glossary th{background:#5b1a3a;color:#fff}
+.glossary th,.glossary td{border:1px solid #cdb7c3}.glossary td:first-child{color:#5b1a3a}
+.glossary tbody tr:nth-child(even){background:#f7eff3}
+ol.num li::before{background:#5b1a3a;border-radius:0}ul.check li::before{border-color:#5b1a3a;border-radius:0}
+.pill{background:#5b1a3a !important;border-radius:0}.flag .t,.sub,.sm,.tm,.sp{color:#444}
+.tl{filter:grayscale(1)}.thumb{border:1px solid #5b1a3a;border-radius:0}.thumb .cap b{color:#1a1a1a}
+.slide .num{background:#5b1a3a !important;border-radius:0}.slide img{border:1px solid #5b1a3a;border-radius:0;box-shadow:none}
+.take{background:#f7eff3;border-left:5px solid #5b1a3a;border-radius:0}.take small{color:#5b1a3a}
+.raw{background:#f4f4f4;border-left:3px solid #5b1a3a;border-radius:0}
+.qa,.qa .a{background:none;border:1px solid #cdb7c3;border-radius:0}.qa .a{border:0;border-top:1px dashed #5b1a3a;border-radius:0}
+.quickref{background:none;border:1px solid #5b1a3a;border-radius:0}.quickref h2{color:#5b1a3a}.quickref-item{background:none;border:1px solid #cdb7c3;border-radius:0}.quickref-item b{color:#5b1a3a}
+.hint{background:#f7eff3;border-radius:0;color:#1a1a1a}.tr h3{color:#5b1a3a;border-bottom:1px solid #5b1a3a}
 """
 
 
@@ -221,7 +249,7 @@ def _diagram(diagram: Dict) -> str:
     diagram_type = diagram.get("type")
     if diagram_type in ("process", "analogy"):
         nodes = diagram.get("nodes") or []
-        body = '<div class="flow">' + "".join(
+        body = f'<div class="flow {"analogy" if diagram_type == "analogy" else "process"}">' + "".join(
             (f'<span class="flow-arrow" aria-hidden="true">→</span>' if index else "")
             + f'<span class="flow-node" dir="auto">{_e(node)}</span>'
             for index, node in enumerate(nodes)
@@ -303,6 +331,87 @@ def _radar_items(emphasis: List[str], flags: List[Dict]) -> List[Dict]:
     return items
 
 
+def _paras(items) -> str:
+    return "".join(f'<p class="para" dir="auto">{_e(x)}</p>' for x in items or [])
+
+
+def _table_html(table: Dict) -> str:
+    head = "".join(f"<th dir=\"auto\">{_e(h)}</th>" for h in table.get("headers", []))
+    rows = "".join(
+        "<tr>" + "".join(f'<td dir="auto">{_e(c)}</td>' for c in row) + "</tr>"
+        for row in table.get("rows", [])
+    )
+    title = f'<div class="tbl-title" dir="auto">{_e(table["title"])}</div>' if table.get("title") else ""
+    return f'{title}<table class="tbl"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>'
+
+
+def _callouts_html(items) -> str:
+    return "".join(
+        f'<div class="callout" dir="auto"><b>{_e(c.get("kind", "Note"))}:</b> {_e(c.get("text", ""))}</div>'
+        for c in items or [] if isinstance(c, dict) and c.get("text")
+    )
+
+
+def _worked_html(items) -> str:
+    out = []
+    for ex in items or []:
+        if not isinstance(ex, dict):
+            continue
+        out.append(
+            '<div class="worked">'
+            f'<h4 dir="auto">💡 Example{": " + _e(ex["title"]) if ex.get("title") else ""}</h4>'
+            + (f'<p class="para" dir="auto">{_e(ex["body"])}</p>' if ex.get("body") else "")
+            + (_table_html(ex["table"]) if ex.get("table") else "")
+            + "</div>"
+        )
+    return "".join(out)
+
+
+def _subsections_html(subsections) -> str:
+    out = []
+    for sub in subsections or []:
+        out.append(
+            '<div class="subsec">'
+            + (f'<h4 dir="auto">{_e(sub["heading"])}</h4>' if sub.get("heading") else "")
+            + _paras(sub.get("paragraphs"))
+            + (_ul(sub["bullets"]) if sub.get("bullets") else "")
+            + "".join(_table_html(t) for t in sub.get("tables") or [])
+            + _callouts_html(sub.get("callouts"))
+            + "</div>"
+        )
+    return "".join(out)
+
+
+def _section_html(section: Dict) -> str:
+    heading = str(section.get("heading", ""))
+    body = [f'<h3 dir="auto"><span class="section-icon">{_section_icon(heading)}</span>{_e(_unprefix_number(heading))}</h3>']
+    body.append(_paras(section.get("intro")))
+    if section.get("key_idea"):
+        body.append(f'<p class="key-idea" dir="auto"><b>Key idea:</b> {_e(section["key_idea"])}</p>')
+    for diagram in section.get("diagrams") or []:
+        body.append(_diagram(diagram))
+    if section.get("bullets"):
+        body.append(_ul(section["bullets"]))
+    if section.get("steps"):
+        body.append('<h4>Process</h4><ol class="num">'
+                    + "".join(f'<li dir="auto">{_e(_unprefix_number(item))}</li>' for item in section["steps"])
+                    + "</ol>")
+    if section.get("equations"):
+        body.append('<h4>Equations &amp; formulas</h4>')
+        body.extend(f'<div class="formula" dir="auto">{_e(item)}</div>' for item in section["equations"])
+    body.extend(_table_html(t) for t in section.get("tables") or [])
+    body.append(_subsections_html(section.get("subsections")))
+    body.append(_worked_html(section.get("worked_examples")))
+    if section.get("examples"):
+        body.append(
+            '<div class="examples"><h4>💡 Examples</h4>'
+            + "".join(f'<div class="example" dir="auto">{_e(item)}</div>' for item in section["examples"])
+            + "</div>"
+        )
+    body.append(_callouts_html(section.get("callouts")))
+    return f'<div class="card lecture">{"".join(body)}</div>'
+
+
 def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     options = options or {}
     subject, slides = lecture_title(ctx), ctx.get("slides", [])
@@ -310,16 +419,10 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     flags = ctx.get("flags", [])
     total_s = max(1, ctx.get("duration_s", 1))
 
-    chips = [fmt_dur(ctx.get("duration_s", 0))]
-    if slides:
-        chips.append(f"{len(slides)} slides")
-    chips += [f'{ctx.get("words", 0):,} words', f'{ctx.get("speakers", 0)} speaker(s)']
-    if flags:
-        chips.append(f"{len(flags)} flagged moment{'s' if len(flags) != 1 else ''}")
-
-    cover = [f'<div class="hero"><div class="kicker">LECTURE NOTES</div><h1 dir="auto">{_e(subject)}</h1>'
-             f'<div class="when">{_e(ctx["date_str"])}</div>'
-             f'<div class="chips">{"".join(f"<span class=chip>{_e(c)}</span>" for c in chips)}</div></div>']
+    subtitle = str(summary.get("subtitle") or "").strip()
+    cover = [f'<div class="hero"><div class="kicker">LECTURE STUDY NOTES</div><h1 dir="auto">{_e(subject)}</h1>'
+             + (f'<div class="subtitle" dir="auto">{_e(subtitle)}</div>' if subtitle else "")
+             + f'<div class="when">{_e(ctx["date_str"])}</div></div>']
 
     if slides:       # timeline bar: how long each slide was on screen
         bar = "".join(
@@ -330,12 +433,14 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                      f'<span>time on each slide</span><span>{_e(ctx.get("end_time", ""))}</span></div>')
 
     if summary:
+        if summary.get("covers"):
+            cover.append('<div class="card covers"><h2>What this document covers</h2>' + _ul(summary["covers"]) + "</div>")
         if summary.get("summary"):
-            cover.append('<div class="card summary"><h2>Summary</h2><ol class="num">'
-                         + "".join(f'<li dir="auto">{_e(x)}</li>' for x in summary["summary"]) + "</ol></div>")
+            heading = "Overview" if summary.get("covers") else "Summary"
+            cover.append(f'<div class="card summary"><h2>{heading}</h2>'
+                         + "".join(f'<p class="para" dir="auto">{_e(x)}</p>' for x in summary["summary"]) + "</div>")
 
-    radar_items = _radar_items(summary.get("emphasis") or [], flags)
-    if flags or any(not item.get("kind") for item in radar_items):
+    if flags:
         quotes = []
         for item in flags:
             timestamp = _timestamp(str(item.get("time") or ""), str(ctx.get("start_time") or ""))
@@ -348,18 +453,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                 f'<div dir="auto"><q>{_e(item.get("text", ""))}</q>'
                 f'{f" <span class=t>· {_e(location)}</span>" if location else ""}</div></div>'
             )
-        takeaways = [
-            f'<li dir="auto">{_e(item["text"])}</li>'
-            for item in radar_items if not item.get("kind")
-        ]
-        cover.append(
-            f'<div class="card radar"><h2>Key moments</h2>{"".join(quotes) or "<div class=none>No flagged quotes.</div>"}</div>'
-        )
-        if takeaways:
-            cover.append(
-                '<div class="card takeaways"><h2>Key takeaways</h2><ul class="plain">'
-                + "".join(takeaways) + "</ul></div>"
-            )
+        cover.append(f'<div class="card radar"><h2>Key moments</h2>{"".join(quotes)}</div>')
 
     todo = []
     for h in summary.get("homework", []) or []:
@@ -383,31 +477,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                          'in Dashboard → Settings to create organized study notes.</div>')
     # ── structured AI study notes ─────────────────────────
     if summary.get("sections"):
-        cards = []
-        for section in summary["sections"]:
-            heading = str(section.get("heading", ""))
-            body = [f'<h3 dir="auto"><span class="section-icon">{_section_icon(heading)}</span>{_e(heading)}</h3>']
-            if section.get("key_idea"):
-                body.append(f'<p class="key-idea" dir="auto"><b>Key idea:</b> {_e(section["key_idea"])}</p>')
-            for diagram in section.get("diagrams") or []:
-                body.append(_diagram(diagram))
-            if section.get("bullets"):
-                body.append(_ul(section["bullets"]))
-            if section.get("steps"):
-                body.append('<h4>Process</h4><ol class="num">'
-                            + "".join(f'<li dir="auto">{_e(_unprefix_number(item))}</li>'
-                                      for item in section["steps"])
-                            + "</ol>")
-            if section.get("equations"):
-                body.append('<h4>Equations &amp; formulas</h4>')
-                body.extend(f'<div class="formula" dir="auto">{_e(item)}</div>' for item in section["equations"])
-            if section.get("examples"):
-                body.append(
-                    '<div class="examples"><h4>💡 Examples</h4>'
-                    + "".join(f'<div class="example" dir="auto">{_e(item)}</div>' for item in section["examples"])
-                    + "</div>"
-                )
-            cards.append(f'<div class="card lecture">{"".join(body)}</div>')
+        cards = [_section_html(section) for section in summary["sections"]]
         if terms:
             cards.append(
                 '<div class="card terms"><h3>Key terms</h3><table class="glossary"><thead><tr><th>Term</th><th>Definition</th></tr></thead><tbody>'
@@ -417,11 +487,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                 )
                 + "</tbody></table></div>"
             )
-        cover.append(
-            '<div class="notes-start"><h2 class="pg">Organized study notes</h2>'
-            '<div class="sub">Key concepts, explanations, formulas, and examples from the lecture.</div>'
-            + "".join(cards) + "</div>"
-        )
+        cover.append('<div class="notes-start">' + "".join(cards) + "</div>")
     elif terms:
         cover.append(
             '<div class="notes-start"><h2 class="pg">Key terms</h2>'
@@ -434,6 +500,20 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         )
     pages = [f'<section class="page cover">{"".join(cover)}</section>']
 
+    # ── quick reference: formula / rule sheets, what the teacher stressed, likely exam questions ──
+    qr_tables = summary.get("quick_reference") or []
+    stressed = [i["text"] for i in _radar_items(summary.get("emphasis") or [], flags) if not i.get("kind")]
+    exam_questions = summary.get("exam_questions") or []
+    has_quick_reference = bool(qr_tables or stressed or exam_questions)
+    if has_quick_reference:
+        qr = ['<h2 class="pg">Quick reference</h2>']
+        qr += [_table_html(t) for t in qr_tables]
+        if stressed:
+            qr.append('<h3 class="qh">Stressed in class</h3>' + _ul(stressed))
+        if exam_questions:
+            qr.append('<h3 class="qh">Likely exam questions</h3>' + _ul(exam_questions))
+        pages.append(f'<section class="page qref">{"".join(qr)}</section>')
+
     # ── at a glance ─────────────────────────────────────
     if slides:
         thumbs = "".join(
@@ -443,7 +523,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         glance = (
             '<h2 class="pg">Lecture at a glance</h2>'
             '<div class="sub">Every slide in order — click one to jump to its notes.</div>'
-            f'<div class="grid">{thumbs}</div>'
+            f'<div class="grid{" dense5" if len(slides) > 24 else " dense" if len(slides) > 9 else ""}">{thumbs}</div>'
         )
         if not summary.get("sections") and not terms:
             cover.append(f'<div class="notes-start">{glance}</div>')
@@ -493,15 +573,16 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             f'<span class="sm">{_e(q.get("time", ""))}</span>'
             + (' <span class="snapbadge">Asked to you</span>' if q.get("to_me") else "")
             + '</div>'
-            + (f'<div class="a" dir="auto"><b>{"Bot reply in chat" if q.get("bot_answer") else "Answer"}:</b> '
-               f'{_e(q.get("answer", ""))}</div>' if q.get("answer") else "")
+            + (f'<div class="a" dir="auto"><b>{"Bot reply in chat" if q.get("bot_answer") else "Answer"}'
+               + (f' <span class="src">via {_e(str(q.get("answered_by")).title())}</span>' if q.get("bot_answer") and q.get("answered_by") else "")
+               + f':</b> {_e(q.get("answer", ""))}</div>' if q.get("answer") else "")
             + '</div>'
             for i, q in enumerate(cqs, 1)
         )
         pages.append(
-            f'<section class="page selftest"><h2 class="pg">Questions Asked in Class</h2>'
+            f'<section class="page cqpage"><h2 class="pg">Questions Asked in Class</h2>'
             f'<div class="sub">Every question raised during the lecture, with its answer.</div>'
-            f'<div class="card quiz-card">{items}</div></section>'
+            f'<div class="cq">{items}</div></section>'
         )
 
     # ── transcript ──────────────────────────────────────
@@ -527,7 +608,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         + "</div>"
         for section in (summary.get("sections") or [])[:6]
     ]
-    if quick_items:
+    if quick_items and not has_quick_reference:
         pages.append(
             '<section class="page"><div class="quickref"><h2>Quick reference</h2>'
             '<div class="quickref-grid">' + "".join(quick_items) + "</div></div></section>"

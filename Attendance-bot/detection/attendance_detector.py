@@ -3,7 +3,10 @@ Attendance Detector - Delta-based. Fully debugged.
 """
 
 import re
+from difflib import SequenceMatcher
+
 from core.logger import setup_logger
+from utils.lang_utils import normalize_urdu
 
 logger = setup_logger("AttendanceDetector")
 
@@ -25,6 +28,8 @@ NAME_EXACT = [
     "سعد نعیم", "سعد نیم", "ساد نیم",
     # First name only (Urdu)
     "سعد", "ساد", "سات", "صعد", "سد",
+    # Devanagari (speech-to-text sometimes writes Urdu this way)
+    "साद नईम", "सआद नईम", "सद नईम", "साद नइम", "साद नाईम",
     # English
     "saad naeem", "saad naim", "saad nayeem", "sad naeem",
     "saad",
@@ -48,7 +53,29 @@ ROLL_PATTERNS = [
 ROLL_ADDRESS_PATTERNS = [
     *ROLL_PATTERNS,
     re.compile(r"(?<!\w)24\s*[kK][\s-]*3[\s-]*0\s*7\s*4(?!\w)"),
+    # Speech-to-text garbles the roll number with stray dots/commas/dashes/spaces and writes the
+    # "K" in Urdu (کے / کی) or Devanagari (के): "24K 30.74", "24 k 3,074", "24 के 3074", "24-K-3-0-7-4"
+    re.compile(r"(?<!\w)24[\s.,\-]*(?:[kK]|کے|کی|के|کا|के)[\s.,\-]*3[\s.,\-]*0[\s.,\-]*7[\s.,\-]*4(?!\d)"),
 ]
+
+
+# ── attendance keywords in every way a teacher (or speech-to-text) might say / write them ──────────
+_ATT_WORD_RE = re.compile(
+    r"(?<!\w)(?:attendance|attendence|atendance|roll\s*call|hazri|haziri|hajri|hazree)(?!\w)", re.I)
+_ATT_NON_ASCII = [normalize_urdu(p) for p in ATTENDANCE_EXACT if not p.isascii()] + [
+    normalize_urdu(w) for w in ("حاضری", "حاضری لگا", "حاضری لگوا")]
+_ATT_DEVANAGARI = ("अटेंडेंस", "अटेन्डेंस", "अटैंडेंस", "अटेंडन्स", "हाज़िरी", "हाजिरी", "हाज़री")
+
+# Does the sentence ask something? ("24K3074 what is a graph" is a question, "24K3074" alone is a roll call.)
+_QUESTIONISH = re.compile(
+    r"[?\u061f]|(?<!\w)(?:what|why|how|when|where|which|who|explain|tell|define|answer|can\s+you|could\s+you|"
+    r"kya|kia|kyun|kyon|kaise|kese|kaisay|batao|bataiye|bataen|samjhao|"
+    + "|".join(re.escape(normalize_urdu(w)) for w in ("کیا", "کیوں", "کیسے", "بتائیں", "بتائیے", "بتاؤ", "بتاو", "سمجھائیں"))
+    + r"|क्या|क्यों|कैसे|बताओ|बताइए|समझाओ)(?!\w)", re.I)
+
+
+def looks_like_question(text) -> bool:
+    return bool(_QUESTIONISH.search(normalize_urdu(text).casefold()))
 
 
 # English STT spellings of the full name ("Saad Naeem", "Sad Naim", "Saat Nayeem" ...)
@@ -84,14 +111,21 @@ class AttendanceDetector:
         self._present_sent = False
         self._prev         = ""
 
+    @staticmethod
+    def is_attendance_keyword(text) -> bool:
+        """The teacher is taking attendance ("attendance", "roll call", "حاضری", "अटेंडेंस", "hazri"...)."""
+        text = str(text or "")
+        folded = normalize_urdu(text).casefold()
+        return bool(_ATT_WORD_RE.search(text)
+                    or any(phrase and phrase in folded for phrase in _ATT_NON_ASCII)
+                    or any(word in text for word in _ATT_DEVANAGARI))
+
     def _is_att(self, text):
-        t = text.casefold()
-        attendance_word = re.search(r"(?<!\w)attendance(?!\w)", t)
-        attendance_variant = any(
-            phrase in t for phrase in ATTENDANCE_EXACT if not phrase.isascii()
-        )
-        return bool(attendance_word or attendance_variant
-                    or any(pattern.search(text) for pattern in ROLL_PATTERNS))
+        if self.is_attendance_keyword(text):
+            return True
+        # My roll number said on its own is a roll call; said inside a question it is not.
+        return (any(pattern.search(text) for pattern in ROLL_PATTERNS)
+                and not looks_like_question(text))
 
     def is_name_mentioned(self, text):
         t = text.casefold()
@@ -104,6 +138,33 @@ class AttendanceDetector:
                     return True
             elif name in t:
                 return True
+        return False
+
+    @staticmethod
+    def _has_urdu_script(text):
+        return bool(re.search(r"[\u0600-\u06FF\u0900-\u097F]", text))
+
+    def _urdu_full_name_heard(self, text, names):
+        """Match full names written in Urdu script, tolerating speech-to-text spelling variants
+        (different yeh/heh/kaf/alef forms, diacritics) and one slightly garbled word.
+        A different second name (e.g. another student called Saad) must NOT match."""
+        norm = normalize_urdu(text)
+        tokens = norm.split()
+        for name in names:
+            if not self._has_urdu_script(name):
+                continue
+            target = normalize_urdu(name)
+            parts = target.split()
+            if len(parts) < 2:
+                continue
+            if target in norm:
+                return True
+            size = len(parts)
+            for i in range(len(tokens) - size + 1):
+                window = tokens[i:i + size]
+                if (SequenceMatcher(None, " ".join(window), target).ratio() >= 0.86
+                        and all(SequenceMatcher(None, w, p).ratio() >= 0.65 for w, p in zip(window, parts))):
+                    return True
         return False
 
     def is_addressed(self, text):
@@ -121,6 +182,8 @@ class AttendanceDetector:
         full_names = [n for n in (*NAME_EXACT, *self._extra_names, str(self.student.get("name", "")).lower())
                       if n and len(n.split()) >= 2]
         if any(" ".join(n.casefold().split()) in " ".join(t.split()) for n in full_names):
+            return True
+        if self._urdu_full_name_heard(text, full_names):
             return True
         if self.student.get("respond_to_first_name"):
             first = [n for n in (*NAME_EXACT, *self._extra_names) if n and len(n.split()) == 1]

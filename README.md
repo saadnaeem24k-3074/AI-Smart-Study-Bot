@@ -340,3 +340,34 @@ sounddevice==0.4.6          WASAPI loopback audio capture
 | `logs/state.json` | Live bot state |
 | `logs/watchdog.log` | Crash/restart history |
 | `screenshots/*.png` | Error screenshots |
+
+## Bilingual live replies (Urdu / Roman Urdu / English)
+
+When the teacher calls your name and asks something, the bot answers in the language it was asked in:
+
+| Teacher says | Bot replies in |
+|---|---|
+| `What is slope?` | English |
+| `tum kese ho` | Roman Urdu (`Main theek hoon, shukriya.`) |
+| `آپ کیسے ہیں` | Urdu script |
+| Mixed (`algorithm ka time complexity kya hai`) | Same mixed style, technical terms in English |
+
+Change this in **Dashboard → Settings → Live chat reply language** (Auto / English / Urdu / Roman Urdu).
+If the word lists do not recognise a question, the bot asks your AI provider whether you were just asked
+something (max 3 checks per name call), so it needs an AI key saved in Settings.
+
+### Speed and reliability notes (live answers)
+
+- Speech is transcribed per sentence (Groq mode), so a question is picked up about a second after the teacher finishes it.
+- Whisper gets a spelling hint (your roll number, name and subject) and drops its usual silence "hallucinations".
+- Urdu spoken audio that Whisper labels "Hindi" (Devanagari) is understood and answered in Urdu.
+- Garbled roll numbers such as `24K 30.74` or `24 के 3074` still count as being called.
+- One question is answered once, even if captions, microphone and meeting audio all report it.
+- The bot never reads its own chat replies or messages meant for other roll numbers.
+- Live replies use only the recent lecture, a 12 s timeout, one quick retry, and fall back to any other AI provider you have a key for (e.g. Groq) if Gemini is overloaded.
+
+### Notes format, attendance and reply style
+
+- **Notes** are always written in English and follow a study-guide layout: title and topic line, "What this document covers", numbered sections with numbered sub-sections, comparison/rule tables, worked examples, Exam-tip / Remember / Common-mistake callouts, a quick-reference sheet, likely exam questions and a self-test. The cover no longer shows duration, word or speaker counts. Slide snapshots are still added.
+- **Attendance:** when the teacher says "attendance", "roll call", "حاضری", "अटेंडेंस" or "hazri" (in captions, microphone or meeting audio) the bot sends `Present Sir`. If your name or roll number is called during attendance it answers again.
+- **Live replies:** an English question gets an English answer; an Urdu / Hindi-script / Roman Urdu question gets a Pakistani Gen-Z Urdu+English mix, e.g. `Sir samajh agaya hai, but how would we know ki hamein yeh karna hai?`. Replies are faster: if the main AI provider has not answered within about 2.5 seconds, your other provider (e.g. Groq) is asked in parallel and the first answer wins; the chat message is pasted instead of typed key by key.

@@ -36,7 +36,20 @@ GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MODELS = ["whisper-large-v3", "whisper-large-v3-turbo"]   # falls back to turbo if large-v3 is refused
 GROQ_WINDOW_SECONDS = 22
 GROQ_STEP_SECONDS = 20
-GROQ_MIN_INTERVAL = 3.5
+GROQ_MIN_INTERVAL = 3.0
+
+# Whisper invents these on silence / background noise; a real answer is never just one of them.
+_HALLUCINATION_WORDS = frozenset("thank you thanks very much um uh hmm okay ok bye so yeah the".split())
+_ALLOWED_LANGUAGES = frozenset({
+    "en", "english", "ur", "urdu", "hi", "hindi", "unknown", "pa", "punjabi", "sd", "sindhi",
+    "ar", "arabic", "fa", "persian", "ps", "pashto",
+})
+
+
+def _is_hallucination(text: str) -> bool:
+    words = re.findall(r"[^\W_]+", text.lower())
+    return not words or (len(words) <= 4 and all(w in _HALLUCINATION_WORDS for w in words))
+
 
 _ASR_JUNK = re.compile(
     r"\b(?:thank\s+(?:you|u)\s+for\s+watching|thanks?\s+for\s+watching|please subscribe|"
@@ -44,6 +57,72 @@ _ASR_JUNK = re.compile(
     r"see you in the next video)\b",
     re.I,
 )
+
+
+class UtteranceSegmenter:
+    """Cut a continuous audio stream into utterances at pauses, so a question is transcribed as
+    soon as the teacher finishes it (about a second later) instead of waiting for a fixed
+    20-second window. Uses a simple adaptive energy detector; no extra dependencies."""
+
+    def __init__(self, sample_rate: int = SAMPLE_RATE, silence_s: float = 0.8,
+                 min_speech_s: float = 0.7, max_s: float = 12.0, pre_roll_s: float = 0.4):
+        self.sr = sample_rate
+        self.silence_s, self.min_speech_s, self.max_s, self.pre_roll_s = silence_s, min_speech_s, max_s, pre_roll_s
+        self.noise = 0.004
+        self._pre: list = []
+        self._cur: list = []
+        self._speech_s = 0.0
+        self._silence_s = 0.0
+        self._cur_s = 0.0
+        self._active = False
+
+    def _threshold(self) -> float:
+        return max(0.006, self.noise * 3.0)
+
+    def feed(self, block) -> list:
+        block = np.asarray(block, dtype=np.float32)
+        if block.size == 0:
+            return []
+        dur = block.size / self.sr
+        rms = float(np.sqrt(np.mean(block * block)))
+        speech = rms >= self._threshold()
+        if not speech:                                   # learn the background level from quiet blocks
+            self.noise = max(0.0005, 0.9 * self.noise + 0.1 * rms)
+        out = []
+        if not self._active:
+            if speech:
+                self._active = True
+                self._cur = list(self._pre) + [block]
+                self._cur_s = sum(b.size for b in self._cur) / self.sr
+                self._speech_s, self._silence_s = dur, 0.0
+            else:
+                self._pre.append(block)
+                while self._pre and sum(b.size for b in self._pre) / self.sr > self.pre_roll_s:
+                    self._pre.pop(0)
+            return out
+        self._cur.append(block)
+        self._cur_s += dur
+        if speech:
+            self._speech_s += dur
+            self._silence_s = 0.0
+        else:
+            self._silence_s += dur
+        if self._silence_s >= self.silence_s or self._cur_s >= self.max_s:
+            chunk = self._finish()
+            if chunk is not None:
+                out.append(chunk)
+        return out
+
+    def _finish(self):
+        audio = np.concatenate(self._cur) if self._cur else None
+        keep = self._speech_s >= self.min_speech_s
+        self._cur, self._pre = [], []
+        self._cur_s = self._speech_s = self._silence_s = 0.0
+        self._active = False
+        return audio if keep and audio is not None else None
+
+    def flush(self):
+        return self._finish() if self._active else None
 
 
 def _strip_overlap(previous: str, current: str, max_words: int = 24) -> str:
@@ -69,7 +148,10 @@ class WhisperRecognizer:
 
     def __init__(self, on_transcript: Optional[Callable[[str], None]] = None,
                  model_size: str = "base",
-                 on_speech: Optional[Callable[[str, str], None]] = None):
+                 on_speech: Optional[Callable[[str, str], None]] = None,
+                 prompt_hint: str = ""):
+        self.prompt_hint = (prompt_hint or "").strip()
+        self._hint_words = set(re.findall(r"[^\W_]+", self.prompt_hint.lower()))
         self.on_transcript = on_transcript
         self.on_speech = on_speech
         self.model_size = model_size
@@ -352,6 +434,8 @@ class WhisperRecognizer:
             w.writeframes((np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes())
         wav = buf.getvalue()
         extra = {"language": os.environ["GROQ_WHISPER_LANGUAGE"]} if os.environ.get("GROQ_WHISPER_LANGUAGE") else {}
+        if self.prompt_hint:                       # spelling hint: my name, roll number, subject
+            extra["prompt"] = self.prompt_hint[:600]
         for _ in range(3):
             wait = GROQ_MIN_INTERVAL - (time.monotonic() - self._groq_last)
             if wait > 0:
@@ -404,12 +488,35 @@ class WhisperRecognizer:
             except (queue.Empty, queue.Full):
                 pass
 
+    def _transcribe_queue_utterances(self):
+        """Groq mode: transcribe each spoken sentence as soon as it ends (low latency, and only
+        speech is uploaded, which also keeps us inside Groq's free-tier limits)."""
+        segmenters = {"microphone": UtteranceSegmenter(), "playback": UtteranceSegmenter()}
+
+        def send(audio, source):
+            if audio is not None and float(np.max(np.abs(audio))) >= MIN_AUDIO_PEAK:
+                self._transcribe(audio, source)
+
+        while self.running or not self._capture_finished.is_set() or not self.audio_queue.empty():
+            try:
+                source, block = self.audio_queue.get(timeout=0.25)
+            except queue.Empty:
+                if not self.running and self._capture_finished.is_set():
+                    break
+                continue
+            segmenter = segmenters.get(source)
+            if segmenter is None:
+                logger.warning(f"Ignoring audio from unknown source '{source}'.")
+                continue
+            for audio in segmenter.feed(block):
+                send(audio, source)
+        for source, segmenter in segmenters.items():
+            send(segmenter.flush(), source)
+
     def _transcribe_queue(self):
-        if self.use_groq:        # bigger, rarer batches keep us under Groq's 20 requests/min
-            mic_w = pb_w = GROQ_WINDOW_SECONDS
-            mic_s = pb_s = GROQ_STEP_SECONDS
-        else:
-            mic_w, mic_s, pb_w, pb_s = MIC_WINDOW_SECONDS, MIC_STEP_SECONDS, WINDOW_SECONDS, STEP_SECONDS
+        if self.use_groq:
+            return self._transcribe_queue_utterances()
+        mic_w, mic_s, pb_w, pb_s = MIC_WINDOW_SECONDS, MIC_STEP_SECONDS, WINDOW_SECONDS, STEP_SECONDS
         windows = {"microphone": SAMPLE_RATE * mic_w, "playback": SAMPLE_RATE * pb_w}
         steps = {"microphone": SAMPLE_RATE * mic_s, "playback": SAMPLE_RATE * pb_s}
         buffered = {source: np.empty((0,), dtype=np.float32) for source in windows}
@@ -464,6 +571,7 @@ class WhisperRecognizer:
                 compression_ratio_threshold=2.3,
                 condition_on_previous_text=False,
                 language=os.environ.get("WHISPER_LANGUAGE", "").strip() or None,
+                initial_prompt=self.prompt_hint or None,
             )
             accepted = []
             for segment in segments:
@@ -487,6 +595,15 @@ class WhisperRecognizer:
         self._emit(text, getattr(info, "language", None) or "unknown", source)
 
     def _emit(self, text: str, language: str, source: str):
+        text = (text or "").strip()
+        if not text or _is_hallucination(text):
+            return
+        if str(language).lower() not in _ALLOWED_LANGUAGES:      # e.g. a stray "Japanese" hallucination
+            logger.info(f"[Whisper:{source}:{language}] ignored (not Urdu/English/Hindi): {text[:60]}")
+            return
+        words = re.findall(r"[^\W_]+", text.lower())
+        if self._hint_words and words and all(w in self._hint_words for w in words):
+            return                                               # Whisper echoing my spelling hint
         previous_text = self._last_text_by_source.get(source, "")
         text = _strip_overlap(previous_text, text)
         if not text:

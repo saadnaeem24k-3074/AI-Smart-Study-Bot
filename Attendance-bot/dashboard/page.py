@@ -237,10 +237,11 @@ textarea,input[type=text],input[type=password],select{background:var(--sunk);bor
       <label class="tog"><input type="checkbox" id="fCalled"><span class="sw"></span><span><b>Name-call alert</b><small>Sound and popup when your name or roll number is called.</small></span></label>
       <label class="tog"><input type="checkbox" id="fSlides"><span class="sw"></span><span><b>Capture slides</b><small>Save presented slides and explain them in your notes.</small></span></label>
       <label class="tog"><input type="checkbox" id="fWhisper"><span class="sw"></span><span><b>Microphone and audio transcription</b><small>Groq Whisper large-v3 when a Groq key is set, otherwise local Whisper, on your microphone and speaker playback; spoken questions can be answered in meeting chat.</small></span></label>
+      <label class="tog"><input type="checkbox" id="fAnswer"><span class="sw"></span><span><b>Answer questions in chat</b><small>When the teacher asks YOU a question (your full name or roll number), the bot types the answer in the meeting chat. Turn off to stay silent; questions are still saved in your notes. Attendance (Present Sir) is separate and always works.</small></span></label>
     </div>
     <div class="row" style="margin:16px 0 0">
       <div><label class="f" for="fCapLang">Teacher's caption language</label><select id="fCapLang"><option value="urdu">Urdu</option><option value="english">English</option><option value="keep">Keep Meet's setting</option></select></div>
-      <div><label class="f" for="fNotesLang">AI notes language</label><select id="fNotesLang"><option>English</option><option>Urdu</option><option>Roman Urdu</option></select></div>
+      <div><label class="f" for="fReplyLang">Live chat reply language</label><select id="fReplyLang"><option value="auto">Auto (match the teacher: Urdu / Roman Urdu / English)</option><option>English</option><option>Urdu</option><option>Roman Urdu</option></select></div>
       <div><label class="f" for="fMode">Slide capture mode</label><select id="fMode"><option value="auto">Auto (presentations only)</option><option value="always">Always (largest video)</option><option value="off">Off</option></select></div>
       <div><label class="f" for="fInt">Check for new slide (seconds)</label><input id="fInt" type="number" min="2" max="60"></div>
       <div><label class="f" for="fKey">Snapshot interval (seconds, 0 = off)</label><input id="fKey" type="number" min="0" max="300"></div></div>
@@ -370,11 +371,11 @@ function renderTags(){$("nameTags").innerHTML=NAME_TAGS.map((n,i)=>`<span class=
 function addTag(){const f=$("nameTagInput"),v=f.value.trim();if(v&&!NAME_TAGS.includes(v)){NAME_TAGS.push(v);renderTags();}f.value="";}
 $("addTagBtn").onclick=addTag;$("nameTagInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addTag();}});
 $("nameTags").addEventListener("click",e=>{const b=e.target.closest("[data-rm]");if(b){NAME_TAGS.splice(+b.dataset.rm,1);renderTags();}});
-const FT=[["fNotes","notes"],["fAI","ai_summary"],["fCalled","called_alert"],["fSlides","slides"],["fWhisper","whisper_transcription"]];
+const FT=[["fNotes","notes"],["fAI","ai_summary"],["fCalled","called_alert"],["fSlides","slides"],["fWhisper","whisper_transcription"],["fAnswer","answer_questions"]];
 function fillSettings(){const s=CFG.student,f=CFG.features;
   $("sName").value=s.name||"";$("sRoll").value=s.roll_no||"";NAME_TAGS=[...(s.urdu_names||[])];renderTags();
   FT.forEach(([id,k])=>$(id).checked=!!f[k]);
-  $("fMode").value=f.slide_mode;$("fInt").value=f.slide_interval;$("fCapLang").value=f.caption_language;$("fNotesLang").value=f.notes_language;
+  $("fMode").value=f.slide_mode;$("fInt").value=f.slide_interval;$("fCapLang").value=f.caption_language;$("fReplyLang").value=f.reply_language||"auto";
   $("fKey").value=f.keyframe_interval;$("fPdfDetail").value=f.pdf_detail;$("fPdfPaper").value=f.pdf_paper_size;$("fPdfTranscript").checked=f.pdf_include_transcript;
   $("aProv").value=CFG.ai.provider;showProv();}
 function showProv(){const p=CFG.ai.providers[$("aProv").value];$("aModel").value=p.model||"";$("aModel").placeholder=p.default_model;
@@ -386,8 +387,8 @@ $("testAIButton").onclick=async()=>{const b=$("testAIButton");busy(b,true,"Testi
   catch(e){}finally{busy(b,false,"Test connection");}};
 $("saveSettingsButton").onclick=async()=>{const b=$("saveSettingsButton");busy(b,true,"Saving");
   const body={student:{name:$("sName").value,roll_no:$("sRoll").value,urdu_names:NAME_TAGS},
-    features:{notes:$("fNotes").checked,ai_summary:$("fAI").checked,called_alert:$("fCalled").checked,whisper_transcription:$("fWhisper").checked,slides:$("fSlides").checked,
-      slide_mode:$("fMode").value,slide_interval:$("fInt").value,caption_language:$("fCapLang").value,notes_language:$("fNotesLang").value,keyframe_interval:$("fKey").value,
+    features:{notes:$("fNotes").checked,ai_summary:$("fAI").checked,called_alert:$("fCalled").checked,whisper_transcription:$("fWhisper").checked,answer_questions:$("fAnswer").checked,slides:$("fSlides").checked,
+      slide_mode:$("fMode").value,slide_interval:$("fInt").value,caption_language:$("fCapLang").value,reply_language:$("fReplyLang").value,keyframe_interval:$("fKey").value,
       pdf_detail:$("fPdfDetail").value,pdf_paper_size:$("fPdfPaper").value,pdf_include_transcript:$("fPdfTranscript").checked},
     ai:{provider:$("aProv").value,model:$("aModel").value,api_key:$("aKey").value,clear_key:$("aClear").checked}};
   try{await api("POST","/api/settings",body);toast("Settings saved");await loadConfig();}catch(e){}finally{busy(b,false,"Save settings");}};

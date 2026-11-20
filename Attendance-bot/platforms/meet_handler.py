@@ -12,6 +12,7 @@ from detection.attendance_detector import AttendanceDetector
 from detection.whisper_asr import WhisperRecognizer
 from core import config_store
 from utils.alerts import CalledAlert
+from utils.lang_utils import normalize_urdu
 from utils.slide_capture import SlideCapture
 from utils.selectors import MEET
 from utils import ai_notes
@@ -24,15 +25,42 @@ _CAPTION_UI = re.compile(
     r"\blanguage\s*:\s*english\b",
     re.IGNORECASE,
 )
+def _urdu_words(*words) -> str:
+    """Alternation of Urdu-script words, folded the same way captions are folded."""
+    return "|".join(sorted({re.escape(normalize_urdu(w)) for w in words}, key=len, reverse=True))
+
+
+def _word(alternatives: str) -> str:
+    return rf"(?<!\w)(?:{alternatives})(?!\w)"
+
+
+def _norm(text) -> str:
+    """Case-fold + fold Urdu spelling variants so cue words match however the captions spell them."""
+    return normalize_urdu(text).casefold()
+
+
+# Question words in English, Roman Urdu, Urdu script and Devanagari (Whisper sometimes writes
+# Urdu speech in Devanagari).
+_ROMAN_WH = ("kya|kia|kiya|kyun|kyon|kyu|kaise|kaisay|kese|kesay|kaisa|kaisi|kesa|kesi|kab|kahan|"
+             "kahaan|kaun|kon|konsa|kaunsa|kitna|kitni|kitne|kis")
+_URDU_WH = _urdu_words("کیا", "کیوں", "کیسے", "کیسا", "کیسی", "کب", "کہاں", "کون", "کونسا",
+                       "کونسی", "کس", "کتنا", "کتنی", "کتنے", "کدھر")
+_DEVA_WH = "क्या|क्यों|कैसे|कैसा|कैसी|कब|कहाँ|कहां|कौन|किस|कितना|कितनी|कितने"
+# Prompts to answer / explain.
+_ROMAN_ASK = ("batao|bataiye|bataye|bataen|batayen|batado|samjhao|samjhaiye|samjhain|samjhen|"
+              "jawab|jawaab|bolo|boliye|bolen")
+_URDU_ASK = _urdu_words("جواب", "بتائیں", "بتائیے", "بتایئے", "بتاؤ", "بتاو", "بتادیں", "سمجھائیں",
+                        "سمجھائیے", "سمجھاؤ", "سمجھاو", "بولیں", "بولیے", "بولو", "وضاحت")
+_DEVA_ASK = "बताइए|बताओ|बताएं|समझाइए|समझाओ|जवाब|बोलिए"
+
 _QUESTION_CUE = re.compile(
-    r"[?؟]|\b(?:what|why|how|when|where|which|who|whose|whom|"
-    r"kya|kyun|kaise|kab|kahan|kon|kis|kitna|kitni)\b|"
-    r"\b(?:can|could|would|should|will)\s+you\b|"
-    r"(?:کیا|کیوں|کیسے|کب|کہاں|کون|کس)",
+    r"[?؟]|"
+    + _word(r"what|why|how|when|where|which|who|whose|whom|" + _ROMAN_WH + "|" + _URDU_WH + "|" + _DEVA_WH)
+    + r"|\b(?:can|could|would|should|will)\s+you\b",
     re.IGNORECASE,
 )
 _ANSWER_PROMPT = re.compile(
-    r"\b(?:answer|respond|explain|tell us|your thoughts)\b|(?:جواب|بتائیں|سمجھائیں)",
+    _word(r"answer|respond|explain|tell us|your thoughts|" + _ROMAN_ASK + "|" + _URDU_ASK + "|" + _DEVA_ASK),
     re.IGNORECASE,
 )
 _MIC_QUESTION_PROMPT = re.compile(
@@ -43,15 +71,77 @@ _MIC_QUESTION_PROMPT = re.compile(
 
 
 _WH_WORD = re.compile(
-    r"\b(?:what|why|how|when|where|which|who|define|kya|kyun|kaise|kab|kahan|kon|kis)\b|"
-    r"(?:\u06a9\u06cc\u0627|\u06a9\u06cc\u0648\u06ba|\u06a9\u06cc\u0633\u06d2|\u06a9\u0628|\u06a9\u06c1\u0627\u06ba|\u06a9\u0648\u0646|\u06a9\u0633)",
+    _word(r"what|why|how|when|where|which|who|define|" + _ROMAN_WH + "|" + _URDU_WH + "|" + _DEVA_WH),
     re.IGNORECASE,
 )
-_CALL_ON = re.compile(r"\b(?:can|could|would|will)\s+you\b", re.IGNORECASE)
+# "can you ..." in English / Roman Urdu / Urdu
+_CALL_ON = re.compile(
+    r"\b(?:can|could|would|will)\s+you\b|" + _word(r"sakt[eai]|" + _urdu_words("سکتے", "سکتا", "سکتی")),
+    re.IGNORECASE,
+)
+
+_CHAT_TIME = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?$", re.I)
+_CHAT_UI = {"hover over a message to pin it", "keep", "pin message", "unpin message", "unpin",
+            "pinned", "you", "copy", "reply", "more options", "delete"}
+_SPLIT = re.compile(r"[\s,.;:!?\u061f\u06d4\"'()\[\]{}\-]+")
+# Words that carry no topic: ignored when judging "is this the same question again?" and
+# "does this sentence contain a real question, or just 'Saad, you answer'?"
+_FILLER = frozenset(
+    "you me us please now sir madam ji aap ap tum tu mujhe mujhay mjhe zara ab toh to aur and the a an "
+    "is are was were of it this that in on at for with what why how when where which who define do does "
+    "can could would will tell explain answer respond say give batao bataiye bataen kya kia kaise kese "
+    "hai hain ho ka ki ke ko se me mein "
+    "آپ مجھے اب تو اور ہے ہیں میں کو کی کا کے سے کیا کیسے کیوں "
+    "मुझे आप अब तो और है हैं में को की का के से क्या कैसे क्यों बताओ बताइए समझाओ".split()
+)
+
+
+def _tokens(text) -> list:
+    return [t for t in _SPLIT.split(str(text or "")) if t]
+
+
+def _parse_chat_messages(text) -> list:
+    """Meet's chat panel is ONE block of text: [name] / time / message / UI words ("keep", "Pin
+    message") ... Return only OTHER people's messages. My own messages (a group with no name line
+    before its timestamp) - including every answer this bot typed - are skipped, otherwise the bot
+    would read its own replies as new questions and answer itself forever."""
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    messages, sender, pending = [], None, None
+    for index, line in enumerate(lines):
+        low = line.lower()
+        if _CHAT_TIME.match(line):
+            sender, pending = pending, None          # a name right before the time => someone else
+            continue
+        if low in _CHAT_UI or len(low) <= 1:
+            continue
+        next_is_time = index + 1 < len(lines) and bool(_CHAT_TIME.match(lines[index + 1]))
+        after_ui = index == 0 or lines[index - 1].lower() in _CHAT_UI or bool(_CHAT_TIME.match(lines[index - 1]))
+        if next_is_time and after_ui and len(line) <= 40 and len(line.split()) <= 4:
+            pending = line                            # sender name line
+            continue
+        if sender:
+            messages.append(low)
+    return messages
+
+
+
+# Teacher turning to ANOTHER student: a roll number, or a name used as "Ali, can you ..." / "..., Ali?"
+_ANY_ROLL = re.compile(r"(?<!\w)\d{2}\s*k\s*-?\s*\d{4}(?!\w)", re.IGNORECASE)
+_VOCATIVE = re.compile(
+    r"^\s*([A-Za-z]{2,15}|[\u0600-\u06ff]{2,15})\s*[,\u060c]\s*"
+    r"(?:can|could|will|would|what|why|how|when|where|which|who|you|please|tell|explain|answer|"
+    r"batao|kya|aap|tum)\b", re.IGNORECASE)
+_TRAILING_NAME = re.compile(r",\s*([A-Z][a-z]{2,14})\s*[?.!]?\s*$")
+_NOT_A_NAME = {
+    "so", "okay", "ok", "now", "well", "yes", "no", "right", "alright", "and", "but", "then", "also",
+    "next", "see", "look", "first", "second", "third", "for", "if", "as", "because", "actually",
+    "basically", "suppose", "let", "listen", "tell", "please", "hello", "hi", "sir", "guys",
+    "students", "class", "everyone", "everybody", "anyone", "anybody", "sorry", "thanks", "thank",
+}
 
 
 def _sentences(text) -> list:
-    return [p.strip() for p in re.split(r"(?<=[.?!\u061f\u06d4])\s+", str(text or "").strip()) if p.strip()]
+    return [p.strip() for p in re.split(r"(?<=[.?!\u061f\u06d4\u0964])\s+", str(text or "").strip()) if p.strip()]
 
 
 def _parse_caption_blocks(raw) -> list:
@@ -88,6 +178,18 @@ class MeetHandler:
         self._last_queued_question = ""
         self._question_answer_task = None
         self._missing_question_key_logged = False
+        self._recent_sentences = deque(maxlen=6)
+        self._sent_chat_norms = set()
+        self._attendance_mode_until = 0.0
+        self._attendance_marked = False
+        self._present_request = None
+        self._last_present_sent = 0.0
+        self._answer_block_until = 0.0
+        self._recent_answered = deque(maxlen=8)
+        self._ai_check_task = None
+        self._ai_checked = set()
+        self._ai_window_start = 0.0
+        self._ai_calls = 0
         self._chat_opened = False
         self.features    = config_store.get_features(config)
         self.recorder    = None            # NotesRecorder (attached by SessionManager)
@@ -201,8 +303,23 @@ class MeetHandler:
             self.whisper = WhisperRecognizer(
                 on_transcript=self._whisper_texts.put,
                 on_speech=self._queue_whisper_speech,
+                prompt_hint=self._whisper_prompt(),
             )
             self.whisper.start()
+
+    def _whisper_prompt(self) -> str:
+        """Spelling hint for Whisper: my name, roll number and the subject, in the mixed
+        Urdu/English style the teacher uses. This makes '24K3074' and technical terms far more reliable."""
+        student = self.student or {}
+        bits = [str(student.get("roll_no", "")).replace("-", ""), str(student.get("name", ""))]
+        bits += [str(n) for n in (student.get("urdu_names") or [])[:2]]
+        bits = [b.strip() for b in bits if b and b.strip()]
+        subject = str((self.cls or {}).get("subject", "")).strip()
+        hint = ", ".join(dict.fromkeys(bits))
+        if subject:
+            hint += f", {subject}"
+        hint += ". آپ مجھے بتائیں۔"
+        return hint[:400]
 
     def _queue_whisper_speech(self, text, source):
         self._whisper_speech.put((text, source))
@@ -239,11 +356,11 @@ class MeetHandler:
             return bool(check(text))
         return bool(self.detector.is_name_mentioned(text) or self.detector.is_roll_mentioned(text))
 
-    def _log_class_question(self, question, to_me=False, answer=""):
+    def _log_class_question(self, question, to_me=False, answer="", answered_by=""):
         recorder = getattr(self, "recorder", None)
         if recorder is not None and hasattr(recorder, "add_question"):
             try:
-                recorder.add_question(question, to_me=to_me, answer=answer)
+                recorder.add_question(question, to_me=to_me, answer=answer, answered_by=answered_by)
             except Exception as e:
                 logger.debug(f"[Meet] Could not remember class question: {e!r}")
 
@@ -485,6 +602,7 @@ class MeetHandler:
                 pass
 
     async def _read_chat(self) -> List[str]:
+        """Other people's chat messages (never my own / the bot's own replies)."""
         msgs = []
         try:
             for sel in ['[jsname="xySENc"]', '.GDhqjd']:
@@ -494,14 +612,14 @@ class MeetHandler:
                     for i in range(count):
                         try:
                             t = await items.nth(i).inner_text()
-                            if t.strip():
-                                msgs.append(t.strip().lower())
+                            msgs.extend(_parse_chat_messages(t))
                         except Exception:
                             pass
                     break
         except Exception:
             pass
-        return msgs
+        sent = self._sent_chat_norms
+        return [m for m in msgs if " ".join(m.split()) not in sent]
 
     async def _chat_input_visible(self) -> bool:
         try:
@@ -530,7 +648,7 @@ class MeetHandler:
         return self._chat_opened
 
     async def send_chat(self, message: str) -> bool:
-        """Type + send a chat message. Returns True if it was sent."""
+        """Type + send a chat message quickly. Returns True if it was sent."""
         for attempt in (1, 2):
             try:
                 if not await self._ensure_chat_visible():
@@ -538,21 +656,39 @@ class MeetHandler:
                     continue
                 inp = self.page.locator('[aria-label="Send a message"]').first
                 await inp.click(timeout=5000)
-                await asyncio.sleep(0.3)
                 await self.page.keyboard.press("Control+a")
+                if attempt == 1 and len(message) > 12:
+                    # Type two real keystrokes (so Meet wakes the Send button), paste the rest at once.
+                    await self.page.keyboard.type(message[:2], delay=20)
+                    await self.page.keyboard.insert_text(message[2:])
+                    try:
+                        typed = await inp.input_value(timeout=1500)
+                    except Exception:
+                        typed = message
+                    if len(typed.strip()) < len(message) * 0.9:     # box did not take it: type slowly
+                        await self.page.keyboard.press("Control+a")
+                        await self.page.keyboard.type(message, delay=8)
+                else:
+                    await self.page.keyboard.type(message, delay=8 if len(message) > 40 else 30)
                 await asyncio.sleep(0.1)
-                await self.page.keyboard.type(message, delay=30)
-                await asyncio.sleep(0.3)
                 await self.page.keyboard.press("Enter")
-                await asyncio.sleep(0.8)
+                await asyncio.sleep(0.3)
+                self._sent_chat_norms.add(" ".join(message.lower().split()))
                 logger.info(f"[Meet] Sent: '{message}'")
                 subj = "".join(c if c.isalnum() else "_" for c in self.cls.get("subject", "class"))
-                await self.screenshot(f"screenshots/{subj}_{_time.strftime('%H%M%S')}_sent.png")
+                # The screenshot is only a log: take it in the background so the reply is not delayed.
+                asyncio.create_task(self._background_screenshot(f"screenshots/{subj}_{_time.strftime('%H%M%S')}_sent.png"))
                 return True
             except Exception as e:
                 logger.error(f"[Meet] send_chat error (attempt {attempt}): {str(e)[:200]}")
                 self._chat_opened = False
         return False
+
+    async def _background_screenshot(self, path):
+        try:
+            await self.screenshot(path)
+        except Exception as e:
+            logger.debug(f"[Meet] screenshot skipped: {e}")
 
     async def _read_captions(self) -> str:
         return " ".join(f"{speaker} {text}".strip()
@@ -590,6 +726,7 @@ class MeetHandler:
         self._last_present_try = _time.time()
         ok = await self.send_chat("Present Sir")
         if ok:
+            self._last_present_sent = _time.time()
             state.mark_attendance()
             self._pending_present = False
             tg.attendance_marked(cls, how)
@@ -604,8 +741,21 @@ class MeetHandler:
             self.alert.failure(subj, "Gave up sending Present after 5 tries — please type it in chat NOW.")
         return False
 
+    async def _handle_present_request(self, tg, cls, state):
+        """Act on a "Present Sir" request raised while listening (captions, microphone or meeting audio)."""
+        request = self._present_request
+        if not request or _time.time() < request["at"] + request["delay"]:
+            return
+        self._present_request = None
+        if not state.get("attendance_marked"):
+            logger.info(f"[Meet] {request['how']} — sending Present Sir")
+            await self._send_present(tg, cls, state, request["how"])
+        else:
+            logger.info("[Meet] Attendance already marked - not answering the roll call again.")
+
     async def check_and_respond(self, tg, cls, state):
         already_sent = state.get("attendance_marked")
+        self._attendance_marked = bool(already_sent)
 
         # A detected "Present" that failed to send → retry every 10s (max 5 tries)
         if self._pending_present and not already_sent and _time.time() - self._last_present_try >= 10:
@@ -672,9 +822,14 @@ class MeetHandler:
         else:
             self.detector.analyze(latest)
         self._check_for_addressed_question(blocks)
+        await self._handle_present_request(tg, cls, state)
 
     def _check_for_addressed_question(self, blocks):
         now = _time.time()
+        recall = getattr(self, "_recall", None)
+        if recall and now - recall[0] >= 4:              # my name was called, no new question came
+            self._recall = None
+            self._queue_live_answer(recall[1])
         if now - self._pending_live_question_at > 90:
             self._pending_live_question = ""
         if now - self._pending_name_at > 45:
@@ -709,26 +864,155 @@ class MeetHandler:
         if not sentence:
             return
         addressed = self._me_called(sentence)
-        has_wh = bool(_WH_WORD.search(sentence))
-        prompt_like = bool(_ANSWER_PROMPT.search(sentence) or _CALL_ON.search(sentence))
-        real_question = (bool(_QUESTION_CUE.search(sentence)) and (has_wh or len(sentence.split()) >= 5)
+        folded = _norm(sentence)
+        has_wh = bool(_WH_WORD.search(folded))
+        prompt_like = bool(_ANSWER_PROMPT.search(folded) or _CALL_ON.search(folded))
+        real_question = (bool(_QUESTION_CUE.search(folded)) and (has_wh or len(sentence.split()) >= 5)
                          and (has_wh or not prompt_like))
+        recent = self.__dict__.setdefault("_recent_sentences", deque(maxlen=6))
+        if sentence not in recent:
+            recent.append(sentence)
         if real_question and all(q != sentence for _, q in memory):
             memory.append((now, sentence))
             self._log_class_question(sentence)           # remembered for the notes only
+        in_window = bool(self._pending_name_at and now - self._pending_name_at <= 20)
+        # After I was asked something the teacher often fires follow-ups without repeating my
+        # name; keep answering for a while, until another student is called.
+        in_followup = now < getattr(self, "_followup_until", 0.0)
+        if in_followup and not addressed and MeetHandler._calls_someone_else(self, sentence):
+            self._followup_until = 0.0
+            self._pending_name_at = 0.0
+            in_window = in_followup = False
+            self._recall = None
+            logger.info("[Meet] Teacher moved on to another student; follow-up answering paused.")
+        MeetHandler._attendance_from_speech(self, sentence, addressed,
+                                            real_question or (prompt_like and MeetHandler._self_contained(self, folded)), now)
+        handled = False
         if addressed:
             self._pending_name_at = now
             if real_question:
                 question = sentence
-            elif prompt_like and memory:                 # "Saad Naeem, you answer"
+            elif prompt_like and MeetHandler._self_contained(self, folded):   # "24K3074, tell me X and Y"
+                question = sentence
+            elif memory and MeetHandler._can_recall(self, memory[-1], now) and (
+                    prompt_like or not MeetHandler._self_contained(self, folded)):
+                # "Saad Naeem, you answer" / just "Saad Naeem?" -> the teacher means the question that
+                # was asked a moment ago (e.g. to a student who stayed silent), without repeating it.
                 question = memory[-1][1]
+                if not prompt_like:                      # bare call: wait a beat for a NEW question
+                    self._recall = (now, question)
+                    question = ""
+                    handled = True
             else:
-                question = ""                            # just a roll call / name mention
+                question = ""                            # roll call / name mention / unclear
             if question:
                 self._queue_live_answer(question)
-        elif real_question and self._pending_name_at and now - self._pending_name_at <= 20:
-            self._pending_name_at = 0.0                  # question right after my name was called
+                handled = True
+        elif real_question and (in_window or in_followup):
+            self._pending_name_at = 0.0                  # question right after my name / follow-up
+            self._recall = None                          # a fresh question beats the remembered one
             self._queue_live_answer(sentence)
+            handled = True
+        if not handled and (addressed or in_window or in_followup):
+            # The word lists did not recognise a question (Urdu captions often have no "؟" and
+            # use many phrasings), so let the AI decide - works for Urdu, English or a mix.
+            ai_check = getattr(self, "_ai_check_question", None)
+            if callable(ai_check):
+                ai_check(sentence, addressed)
+
+    def _can_recall(self, item, now) -> bool:
+        """May I answer this remembered question now? Recent, not answered yet, and not in the
+        middle of an unmarked roll call."""
+        when, question = item
+        if now - when > 120 or self._is_recent_duplicate(question, now):
+            return False
+        in_mode = now < getattr(self, "_attendance_mode_until", 0.0)
+        return bool(getattr(self, "_attendance_marked", False) or not in_mode)
+
+    def _calls_someone_else(self, sentence) -> bool:
+        sentence = " ".join(str(sentence or "").split())
+        if self._me_called(sentence):
+            return False
+        if _ANY_ROLL.search(sentence):
+            return True
+        match = _VOCATIVE.match(sentence)
+        if match:
+            return match.group(1).lower() not in _NOT_A_NAME
+        tail = _TRAILING_NAME.search(sentence)
+        return bool(tail and tail.group(1).lower() not in _NOT_A_NAME)
+
+    def _attendance_from_speech(self, sentence, addressed, question_like, now):
+        """Attendance heard in ANY language/source:
+          * the teacher says "attendance" / "roll call" / "حاضری" / "अटेंडेंस"  -> Present Sir;
+          * my name or roll number is called during attendance (or on its own before attendance was
+            marked, and not as part of a question)                                -> Present Sir."""
+        detector = getattr(self, "detector", None)
+        keyword = bool(getattr(detector, "is_attendance_keyword", lambda _t: False)(sentence))
+        marked = bool(getattr(self, "_attendance_marked", False))
+        in_mode = now < getattr(self, "_attendance_mode_until", 0.0)
+        if keyword:
+            self._attendance_mode_until = now + 15 * 60
+            if not marked or addressed:
+                self._present_request = {"how": "Attendance keyword", "at": now, "delay": 0.0, "explicit": addressed}
+        elif addressed and not question_like:
+            if in_mode:
+                self._present_request = {"how": "Called during attendance", "at": now, "delay": 0.0, "explicit": True}
+            elif not marked:
+                # A bare call ("24K3074") may be the start of a question: give it a moment first.
+                self._present_request = {"how": "Roll call", "at": now, "delay": 4.0, "explicit": True}
+
+    def _self_contained(self, folded) -> bool:
+        """True when the sentence itself says WHAT to answer ('tell me the difference between P and
+        NP') rather than just calling on me ('Saad Naeem, you answer')."""
+        student = getattr(getattr(self, "detector", None), "student", None) or {}
+        names = {w for n in [student.get("name", ""), *student.get("urdu_names", [])]
+                 for w in _tokens(_norm(n))}
+        words = [w for w in _tokens(folded)
+                 if w not in _FILLER and w not in names and not any(c.isdigit() for c in w)
+                 and not _ANSWER_PROMPT.fullmatch(w) and not _CALL_ON.fullmatch(w)]
+        return len(words) >= 3
+
+    def _ai_check_question(self, sentence, addressed):
+        if not self._answers_enabled():
+            return
+        if len(sentence.split()) < (4 if addressed else 3):   # bare name / filler: wait for more
+            return
+        if not ai_notes.api_key(self.config):
+            return
+        now = _time.time()
+        if now - self._ai_window_start > 30:
+            self._ai_window_start, self._ai_calls = now, 0
+        if self._ai_calls >= 3:
+            return
+        for task in (self._ai_check_task, self._question_answer_task):
+            if task and not task.done():
+                return
+        lines = list(self._recent_sentences)[-3:]
+        key = " ".join(lines)
+        if key in self._ai_checked:
+            return
+        try:
+            task = asyncio.create_task(self._ai_extract_question(lines))
+        except RuntimeError:                              # no running event loop
+            return
+        if len(self._ai_checked) > 200:
+            self._ai_checked.clear()
+        self._ai_checked.add(key)
+        self._ai_calls += 1
+        self._ai_check_task = task
+
+    async def _ai_extract_question(self, lines):
+        try:
+            question = await asyncio.to_thread(
+                ai_notes.extract_addressed_question, self.config, lines,
+                str(self.student.get("name", "")),
+            )
+        except Exception as e:
+            logger.error(f"[Meet] AI question check failed: {e}")
+            return
+        if question:
+            logger.info(f"[Meet] AI recognised a question addressed to me: {question}")
+            self._queue_live_answer(question)
 
     def _check_for_addressed_chat_questions(self, messages):
         for message in messages:
@@ -736,9 +1020,12 @@ class MeetHandler:
             if not normalized or normalized in self._seen_chat_message_set:
                 continue
             self._remember_chat_message(normalized)
-            addressed = self._me_called(normalized)
-            if addressed and _QUESTION_CUE.search(normalized):
-                self._queue_live_answer(message)
+            if normalized in self._sent_chat_norms:       # something I typed myself
+                continue
+            if self._me_called(normalized):
+                folded = _norm(normalized)
+                if _QUESTION_CUE.search(folded) or _ANSWER_PROMPT.search(folded):
+                    self._queue_live_answer(message)
 
     def _remember_chat_message(self, message):
         normalized = " ".join(str(message or "").casefold().split())
@@ -746,21 +1033,80 @@ class MeetHandler:
             return
         self._seen_chat_message_set.add(normalized)
 
+    def _topic_words(self, text) -> set:
+        return {t for t in _tokens(_norm(text))
+                if len(t) >= 2 and t not in _FILLER and not any(c.isdigit() for c in t)}
+
+    def _is_recent_duplicate(self, question, now) -> bool:
+        words = self._topic_words(question)
+        if not words:
+            return False
+        for when, old in getattr(self, "_recent_answered", ()):
+            if now - when <= 90 and old and len(words & old) / min(len(words), len(old)) >= 0.6:
+                return True
+        return False
+
+    def _answers_enabled(self) -> bool:
+        return bool((getattr(self, "features", None) or {}).get("answer_questions", True))
+
     def _queue_live_answer(self, question):
+        if not self._answers_enabled():
+            # Preference is OFF: stay silent, but still remember the question for the notes.
+            if not getattr(self, "_answers_off_logged", False):
+                logger.info("[Meet] 'Answer questions in chat' is OFF - not replying (questions are still noted).")
+                self._answers_off_logged = True
+            self._log_class_question(question, to_me=True)
+            return
+        now = _time.time()
         normalized = " ".join(re.sub(r"\W+", " ", question.casefold()).split())
         if not normalized or normalized == self._last_queued_question:
             return
         if self._question_answer_task and not self._question_answer_task.done():
-            logger.info("[Meet] A live question is already being answered; skipping duplicate.")
+            # a follow-up arrived while the previous answer is being written: answer it next
+            deferred = self.__dict__.setdefault("_deferred_questions", [])
+            if len(deferred) < 2 and all(normalized != d[0] for d in deferred):
+                deferred.append((normalized, question))
+                logger.info("[Meet] Follow-up question queued; answering it right after this one.")
+            return
+        # The teacher's voice reaches me through captions, the microphone AND the meeting audio,
+        # each spelling it differently - so after one answer ignore repeats for a short while.
+        if now < getattr(self, "_answer_block_until", 0.0):
+            logger.debug("[Meet] Just answered a question; ignoring the repeat of it.")
+            return
+        if self._is_recent_duplicate(question, now):
+            logger.debug("[Meet] Same question as one I already answered; skipping.")
             return
         self._last_queued_question = normalized
+        request = getattr(self, "_present_request", None)
+        if request and request.get("delay"):          # it was a question, not a roll call
+            self._present_request = None
+        self._answer_block_until = now + 8          # only to swallow the same sentence heard twice
+        self._followup_until = now + 75             # keep listening for follow-ups
+        self._recent_answered.append((now, self._topic_words(question)))
         self._log_class_question(question, to_me=True)
         self._pending_live_question = ""
         self._pending_live_question_at = 0.0
         self._pending_name_at = 0.0
         self._question_answer_task = asyncio.create_task(self._answer_live_question(question))
 
+    def _pop_deferred(self):
+        deferred = self.__dict__.get("_deferred_questions") or []
+        if deferred:
+            _, question = deferred.pop(0)
+            self._answer_block_until = 0.0
+            self._queue_live_answer(question)
+
     async def _answer_live_question(self, question):
+        try:
+            await self._answer_live_question_inner(question)
+        finally:
+            if self.__dict__.get("_deferred_questions"):
+                try:
+                    asyncio.get_running_loop().call_later(0.5, self._pop_deferred)
+                except RuntimeError:
+                    pass
+
+    async def _answer_live_question_inner(self, question):
         if not ai_notes.api_key(self.config):
             if not self._missing_question_key_logged:
                 logger.warning(
@@ -773,6 +1119,7 @@ class MeetHandler:
         context = self.recorder._plain() if self.recorder is not None else ""
         if not context.strip():
             context = "\n".join(self.captions)
+        context = context[-2500:]        # recent lecture only: a huge prompt makes the reply very slow
         try:
             answer = await asyncio.to_thread(
                 ai_notes.answer_question, self.config, context, question, None, True
@@ -782,10 +1129,16 @@ class MeetHandler:
                 return
             if len(answer) > 1600:
                 answer = answer[:1597].rsplit(" ", 1)[0] + "..."
+            who = dict(getattr(ai_notes, "LAST_LIVE_REPLY", {}) or {})
+            by = (f"{who.get('provider', '?').title()} ({who.get('model', '?')})"
+                  if who.get("provider") else "unknown provider")
             if not await self.send_chat(answer):
                 logger.error("[Meet] Could not send the live question answer to meeting chat.")
             else:
-                self._log_class_question(question, to_me=True, answer=answer)
+                logger.info(f"[Meet] Answer written by {by} in {who.get('seconds', 0):.1f}s")
+                self._log_class_question(question, to_me=True, answer=answer,
+                                         answered_by=who.get("provider", ""))
+            self._answer_block_until = max(self._answer_block_until, _time.time() + 4)
         except Exception as e:
             logger.error(f"[Meet] Live question answering failed: {e}")
 

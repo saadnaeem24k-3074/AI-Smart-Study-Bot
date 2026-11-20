@@ -30,13 +30,16 @@ DEFAULT_FEATURES = {
     "notes": True,            # save lecture transcript to notes/
     "ai_summary": True,       # LLM summary at class end (needs API key)
     "called_alert": True,     # sound + popup when your name is called
+    "answer_questions": True, # answer in meeting chat when the teacher asks YOU a question (attendance is separate)
     "slides": True,           # capture slides + build PDF with notes
     "whisper_transcription": True,  # local transcription of microphone input and meeting playback
     "slide_mode": "auto",     # auto | always | off
     "slide_interval": 4,      # seconds between slide checks
     "keyframe_interval": 30,  # snapshot every N sec while the screen is a video/whiteboard (0 = off)
     "caption_language": "urdu",   # urdu | english | keep (leave Meet's own setting alone)
-    "notes_language": "English",  # language of AI summaries: English | Urdu | Roman Urdu
+    "notes_language": "English",  # legacy: notes are ALWAYS written in English now (this value is ignored)
+    "live_reply_provider": "groq",  # who writes LIVE chat answers (fast): groq | gemini | deepseek | anthropic | auto (= main provider)
+    "reply_language": "auto",  # live chat replies: auto (match the teacher's language) | English | Urdu | Roman Urdu
     "pdf_detail": "detailed",  # concise | detailed
     "pdf_include_transcript": False,  # full captions are also saved separately in transcript.md
     "pdf_paper_size": "A4",  # A4 | Letter
@@ -49,6 +52,7 @@ PROVIDERS = {
 }
 CAPTION_LANGS = ("urdu", "english", "keep")
 NOTES_LANGS = ("English", "Urdu", "Roman Urdu")
+REPLY_LANGS = ("auto",) + NOTES_LANGS
 
 
 # ───────────────────────── raw read / write ─────────────────────────
@@ -170,7 +174,7 @@ def update_settings(data: Dict) -> None:
         ft = data.get("features")
         if isinstance(ft, dict):
             cur = cfg.setdefault("features", {})
-            for k in ("notes", "ai_summary", "called_alert", "slides", "whisper_transcription"):
+            for k in ("notes", "ai_summary", "called_alert", "slides", "whisper_transcription", "answer_questions"):
                 if k in ft:
                     cur[k] = bool(ft[k])
             if "slide_mode" in ft:
@@ -185,6 +189,10 @@ def update_settings(data: Dict) -> None:
                 if ft["notes_language"] not in NOTES_LANGS:
                     raise ValueError("Notes language must be English, Urdu or Roman Urdu")
                 cur["notes_language"] = ft["notes_language"]
+            if "reply_language" in ft:
+                if ft["reply_language"] not in REPLY_LANGS:
+                    raise ValueError("Reply language must be auto, English, Urdu or Roman Urdu")
+                cur["reply_language"] = ft["reply_language"]
             if "pdf_detail" in ft:
                 if ft["pdf_detail"] not in ("concise", "detailed"):
                     raise ValueError("PDF note detail must be concise or detailed")

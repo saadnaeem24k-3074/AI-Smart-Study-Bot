@@ -1,0 +1,28 @@
+[2026-11-12 12:05:03,057] INFO: [AI] Notes → /tmp/tmplvi3y_de/AI/2026-11-12_17-05
+[2026-11-12 12:05:03,062] ERROR: Groq rejected the API key; using the local model instead.
+[2026-11-12 12:05:03,063] WARNING: Groq refused 'whisper-large-v3'; switching to 'whisper-large-v3-turbo'.
+[2026-11-12 12:05:03,064] WARNING: Groq rate limit reached; waiting 1s.
+[2026-11-12 12:05:03,069] INFO: [Meet] Bot has been alone for 0s after class — ending.
+[2026-11-12 12:05:03,072] INFO: [Meet] End of class detected (host ended the meeting / bot left the call).
+[2026-11-12 12:05:03,091] WARNING: Gemini connection failed; retrying once: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Max retries exceeded with url: /v1beta/models/gemini-2.5-flash:generateContent (Caused by NameResolutionError("HTTPSConnection(host='generativelanguage.googleapis.com', port=443): Failed to resolve 'generativelanguage.googleapis.com' ([Errno -2] Name or service not known)"))
+[2026-11-12 12:05:04,094] ERROR: Gemini request error after retry: HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Max retries exceeded with url: /v1beta/models/gemini-2.5-flash:generateContent (Caused by NameResolutionError("HTTPSConnection(host='generativelanguage.googleapis.com', port=443): Failed to resolve 'generativelanguage.googleapis.com' ([Errno -2] Name or service not known)"))
+[2026-11-12 12:05:04,106] INFO: [Meet] End of class detected (host ended the meeting / bot left the call).
+[2026-11-12 12:05:04,107] INFO: Shutting down — leaving active meeting...
+[2026-11-12 12:05:04,107] INFO: Left meeting successfully.
+[2026-11-12 12:05:04,114] INFO: [Math] Notes → /tmp/tmpugyr7dxc/notes/Math/2026-11-12_17-05
+[2026-11-12 12:05:04,116] INFO: [Math] Notes → /tmp/tmpdva9nqsh/notes/Math/2026-11-12_17-05
+[2026-11-12 12:05:04,129] INFO: [Software] Notes → /tmp/tmp62riccd4/notes/Software/2026-11-12_17-05
+[2026-11-12 12:05:04,129] INFO: [Software] Proofreading caption segments with AI...
+[2026-11-12 12:05:04,129] INFO: [Software] AI-corrected transcript saved.
+[2026-11-12 12:05:04,129] INFO: [Software] Generating structured AI study notes...
+[2026-11-12 12:05:04,130] INFO: [Software] Writing notes for 1 slides...
+[2026-11-12 12:05:04,130] INFO: [Software] Notes saved → /tmp/tmp62riccd4/notes/Software/2026-11-12_17-05 (notes.pdf ready)
+[2026-11-12 12:05:04,133] WARNING: Test connection failed; retrying once: temporary disconnect
+[2026-11-12 12:05:05,146] WARNING: AI transcript correction omitted a segment; keeping original captions.
+[2026-11-12 12:05:05,152] WARNING: SoundCard could not capture microphone audio from 'Headset microphone' (RuntimeError()); trying PyAudio.
+[2026-11-12 12:05:05,152] INFO: Capturing microphone 'USB mic' through PyAudio at 48000 Hz.
+[2026-11-12 12:05:05,153] INFO: Ignoring a common end-card / background-audio transcription artifact.
+[2026-11-12 12:05:05,153] INFO: [Whisper:playback:en] The first concept is valid.
+[2026-11-12 12:05:05,154] INFO: [Whisper:microphone:en] What is the derivative?
+[2026-11-12 12:05:05,154] INFO: [Whisper:playback:en] The derivative is the rate of change.
+[2026-11-12 12:05:05,155] INFO: [Whisper:playback:en] The final part of the lecture.

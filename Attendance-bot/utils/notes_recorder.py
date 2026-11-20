@@ -148,7 +148,7 @@ class NotesRecorder:
     def _qkey(text: str) -> str:
         return " ".join(re.sub(r"\W+", " ", str(text or "").casefold()).split())
 
-    def add_question(self, text: str, to_me: bool = False, answer: str = "") -> None:
+    def add_question(self, text: str, to_me: bool = False, answer: str = "", answered_by: str = "") -> None:
         """Remember a question asked in class. `to_me` = the teacher called me, `answer` = what
         the bot replied in chat. Growing captions ("What is an" -> "What is an algorithm?") and
         repeats are merged into one entry."""
@@ -156,6 +156,9 @@ class NotesRecorder:
         key = self._qkey(text)
         if not self.enabled or len(key.split()) < 3:
             return
+        low = text.lower()
+        if len(text) > 500 or "pin message" in low or "hover over a message" in low:
+            return                      # a scraped chat panel / UI text, not a spoken question
         for item in self.questions[-12:]:
             old = self._qkey(item["text"])
             if key == old or key.startswith(old) or old.startswith(key):
@@ -164,15 +167,37 @@ class NotesRecorder:
                 item["to_me"] = item["to_me"] or to_me
                 if answer:
                     item["bot_answer"] = answer
+                if answered_by:
+                    item["answered_by"] = answered_by
                 break
         else:
             self.questions.append({"time": datetime.now(PKT).strftime("%H:%M:%S"), "text": text,
-                                   "to_me": bool(to_me), "bot_answer": answer})
+                                   "to_me": bool(to_me), "bot_answer": answer,
+                                   "answered_by": answered_by})
         try:
             (self.dir / "class_questions.json").write_text(
                 json.dumps(self.questions, ensure_ascii=False, indent=1), encoding="utf-8")
         except Exception:
             pass
+
+    def _merge_questions(self, questions: List[Dict]) -> List[Dict]:
+        """Same question heard several times (captions, microphone, meeting audio) -> one entry."""
+        merged: List[Dict] = []
+        for q in questions:
+            key = self._qkey(q.get("text", ""))
+            for old in merged:
+                other = self._qkey(old.get("text", ""))
+                same = bool(key and other and (key == other or key.startswith(other)
+                                               or other.startswith(key)
+                                               or SequenceMatcher(None, key, other).ratio() >= 0.82))
+                if same:
+                    old["to_me"] = bool(old.get("to_me") or q.get("to_me"))
+                    if q.get("bot_answer") and not old.get("bot_answer"):
+                        old["bot_answer"] = q["bot_answer"]
+                    break
+            else:
+                merged.append(q)
+        return merged
 
     def add_slide(self, rel_file: str, kind: str = "slide") -> int:
         n = len(self.slides) + 1
@@ -379,15 +404,48 @@ class NotesRecorder:
 
         class_questions = [dict(q) for q in self.questions]
         if class_questions and use_ai:
-            answers = await ai_notes.answer_class_questions(
+            # Notes are always English: translate questions heard in Urdu/Hindi/Roman Urdu (and the
+            # bot's chat replies), then merge the duplicates that translation reveals.
+            originals = [q["text"] for q in class_questions]
+            replies = [q.get("bot_answer", "") for q in class_questions]
+            english = await ai_notes.to_english(self.config, originals + replies, plain)
+            count = len(originals)
+            for q, question_en, reply_en in zip(class_questions, english[:count], english[count:]):
+                if question_en != q["text"]:
+                    q["text_original"], q["text"] = q["text"], question_en
+                if q.get("bot_answer") and reply_en != q["bot_answer"]:
+                    q["bot_answer_original"], q["bot_answer"] = q["bot_answer"], reply_en
+            class_questions = self._merge_questions(class_questions)
+            self.questions = class_questions
+        if class_questions and use_ai:
+            # One AI pass: drop statements/noise, rewrite each real question as clear plain English
+            # (no names / roll numbers / filler), remove duplicates, and answer it from the lecture.
+            reviewed = await ai_notes.review_class_questions(
                 self.config, plain, [q["text"] for q in class_questions])
-            for q, a in zip(class_questions, answers):
-                q["answer"] = a
+            kept = []
+            for q, r in zip(class_questions, reviewed):
+                if r is None:                            # AI unavailable: keep only real-looking ones
+                    if q.get("to_me") or q["text"].rstrip().endswith(("?", "؟")):
+                        kept.append(q)
+                    continue
+                if not r["keep"] and not q.get("to_me"):
+                    continue
+                if r["q"]:
+                    q["text"] = r["q"]
+                q["answer"] = r["a"]
+                kept.append(q)
+            class_questions = self._merge_questions(kept)
+            self.questions = class_questions
         for q in class_questions:                        # what the bot really said wins
             if q.get("bot_answer"):
                 q["answer"] = q["bot_answer"]
 
         flags = lecture_insights.find_flags(transcript_segments)
+        if flags and use_ai:                             # key moments are quoted in plain English too
+            english = await ai_notes.to_english(self.config, [f["text"] for f in flags], plain)
+            for f, text in zip(flags, english):
+                f["text"] = text
+        flags = [f for f in flags if not ai_notes.has_foreign_script(f["text"])]
         rows = []
         for i, sl in enumerate(self.slides):
             t_next = self.slides[i + 1]["t"] if i + 1 < len(self.slides) else ended.timestamp()

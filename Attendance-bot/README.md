@@ -362,3 +362,29 @@ sounddevice==0.4.6          WASAPI loopback audio capture
 - Every question heard in class is remembered and added to the notes ("Questions Asked in
   Class" page in notes.pdf, section in transcript.md, `class_questions.json`), with the
   answer — your bot's chat reply if it answered, otherwise an AI answer from the lecture.
+
+## Follow-ups, memory and notes (latest)
+
+- After you are called, follow-up questions are answered for 75 s **without repeating your name**,
+  until the teacher calls another student (name or roll number).
+- If a question was asked to someone else and the teacher then says just "Saad Naeem?" (or "you
+  answer"), the bot answers the remembered question.
+- Each live reply is logged as `Answer written by <provider> (<model>)` and shown in the notes.
+  A provider that returns 401/402/403 (bad key / no balance) is skipped for 20 minutes.
+- Notes are written in plain English (Urdu/Hindi is translated, including quoted key moments);
+  diagram labels are kept short; the slide overview fits one page; the question list is cleaned
+  (statements, noise and duplicates removed) before it goes into the PDF.
+
+## Live answers use Groq first
+
+Live chat answers go to Groq (fastest) when a Groq key is saved; your main provider and any other
+saved key are automatic back-ups. Notes still use the main provider (Gemini). Change it with
+`"live_reply_provider"` under `features` in schedule.json (`groq`, `gemini`, `deepseek`,
+`anthropic` or `auto` = main provider).
+
+## Answer-questions switch and attendance
+
+- Dashboard → Settings → **Answer questions in chat** (on by default). Off = the bot never replies
+  to the teacher's questions, but every question is still saved in the notes.
+- Attendance is separate: "Present Sir" is sent once, and once attendance is marked the bot never
+  answers a roll call again (even when the teacher repeats it or calls your name).

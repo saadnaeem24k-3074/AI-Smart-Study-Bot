@@ -24,6 +24,41 @@ warnings.filterwarnings("ignore", message=".*data discontinuity.*")
 logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 
 SAMPLE_RATE = 16000
+
+
+def _com_initialize() -> bool:
+    """Initialize COM on the calling thread and report whether we own the initialization.
+
+    ``soundcard`` drives WASAPI through COM, but it only initializes COM on the thread
+    that imports the module. Every class starts fresh capture threads, so once the first
+    class's threads exit the process is left without an initialized COM apartment. The
+    next class then cannot enumerate/open the microphone and loopback devices, which made
+    local transcription work only for the first of several back-to-back classes. Calling
+    this on each capture thread (and uninitializing on exit) fixes that.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        hr = ctypes.windll.ole32.CoInitializeEx(None, 0x0)   # COINIT_MULTITHREADED
+    except Exception:
+        return False
+    result = hr & 0xFFFFFFFF
+    # S_OK (0) and S_FALSE (1) both mean this thread now holds an initialization count;
+    # RPC_E_CHANGED_MODE (0x80010106) means COM is already initialized differently.
+    return result in (0x0, 0x1)
+
+
+def _com_uninitialize() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.ole32.CoUninitialize()
+    except Exception:
+        pass
+
+
 WINDOW_SECONDS = 8
 STEP_SECONDS = 5
 MIC_WINDOW_SECONDS = 4
@@ -215,9 +250,19 @@ class WhisperRecognizer:
             self._thread.join(timeout=30)
             if self._thread.is_alive():
                 logger.warning("Whisper worker is still finishing its current audio chunk.")
+        # Make sure the capture workers have released the microphone/loopback devices
+        # before the next class opens them, and let the transcriber drain its last audio.
+        self._capture_finished.wait(timeout=5)
+        if self._transcriber and self._transcriber.is_alive():
+            self._transcriber.join(timeout=15)
+            if self._transcriber.is_alive():
+                logger.warning("Whisper worker is still finishing its current audio chunk.")
+        if WhisperRecognizer._active is self:
+            WhisperRecognizer._active = None
         logger.info("Local audio transcription stopped.")
 
     def _capture_loop(self):
+        com_initialized = False
         try:
             if sys.platform == "win32":
                 dll_directory = os.path.dirname(sys.executable)
@@ -227,6 +272,10 @@ class WhisperRecognizer:
                     )
                 self._cuda_dll_directory = os.add_dll_directory(dll_directory)
             import soundcard
+            # Initialize COM on this thread *after* importing soundcard (its import-time
+            # initializer fails if the thread already initialized COM). Each class starts
+            # new threads, so this keeps the microphone/loopback usable in every class.
+            com_initialized = _com_initialize()
             if self.use_groq:
                 logger.info(f"Transcribing with Groq Whisper ({self._groq_model}); local model is a fallback only.")
             else:
@@ -288,8 +337,11 @@ class WhisperRecognizer:
                 self._transcriber.join(timeout=15)
                 if self._transcriber.is_alive():
                     logger.warning("Whisper worker is still finishing its current audio chunk.")
+            if com_initialized:
+                _com_uninitialize()
 
     def _capture_source(self, source, microphone, name):
+        com_initialized = _com_initialize()
         try:
             with microphone.recorder(samplerate=SAMPLE_RATE, blocksize=4096) as recorder:
                 while self.running:
@@ -314,6 +366,9 @@ class WhisperRecognizer:
                     f"Could not capture {source} audio from '{name}': {e!r}",
                     exc_info=True,
                 )
+        finally:
+            if com_initialized:
+                _com_uninitialize()
 
     def _capture_pyaudio_microphone(self, name):
         import pyaudio

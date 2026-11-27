@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from detection import whisper_asr
 from detection.whisper_asr import WhisperRecognizer, _strip_overlap
 
 
@@ -232,6 +233,32 @@ class WasapiDeviceTests(unittest.TestCase):
 
         self.assertIsInstance(microphone, LoopbackMicrophone)
         self.assertEqual(name, "Default speakers")
+
+    def test_capture_source_initializes_com_on_its_own_thread(self):
+        class Microphone:
+            @staticmethod
+            def recorder(**_kwargs):
+                raise RuntimeError("device busy")
+
+        recognizer = WhisperRecognizer()
+        recognizer.running = True
+        with (
+            patch.object(whisper_asr, "_com_initialize", return_value=True) as init,
+            patch.object(whisper_asr, "_com_uninitialize") as uninit,
+        ):
+            recognizer._capture_source("playback", Microphone(), "Default speakers")
+
+        init.assert_called_once_with()
+        uninit.assert_called_once_with()
+
+    def test_stop_releases_active_recognizer_for_the_next_class(self):
+        recognizer = WhisperRecognizer()
+        WhisperRecognizer._active = recognizer
+        try:
+            recognizer.stop()
+            self.assertIsNone(WhisperRecognizer._active)
+        finally:
+            WhisperRecognizer._active = None
 
     def test_reports_missing_playback_device(self):
         class FakeSoundCard:

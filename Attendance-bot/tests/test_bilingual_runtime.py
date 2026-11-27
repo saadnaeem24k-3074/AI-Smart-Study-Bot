@@ -141,8 +141,7 @@ class WhisperTests(unittest.TestCase):
 
 class FastLiveCallTests(unittest.TestCase):
     def test_falls_back_to_another_provider_when_the_first_is_overloaded(self):
-        cfg = {"ai": {"provider": "gemini", "keys": {"gemini": "g", "groq": "q"}},
-               "features": {"live_reply_provider": "auto"}}
+        cfg = {"ai": {"provider": "gemini", "keys": {"gemini": "g", "groq": "q"}}}
         seen = []
 
         def fake_call(config, *args, **kwargs):

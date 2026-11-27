@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 from playwright.async_api import async_playwright, BrowserContext
 from core.logger import setup_logger
 from detection.attendance_detector import AttendanceDetector
+from detection import addressing
 from detection.whisper_asr import WhisperRecognizer
 from core import config_store
 from utils.alerts import CalledAlert
@@ -16,6 +17,7 @@ from utils.lang_utils import normalize_urdu
 from utils.slide_capture import SlideCapture
 from utils.selectors import MEET
 from utils import ai_notes
+from utils.speakers import SpeakerTracker
 
 logger = setup_logger("MeetHandler")
 
@@ -125,21 +127,6 @@ def _parse_chat_messages(text) -> list:
 
 
 
-# Teacher turning to ANOTHER student: a roll number, or a name used as "Ali, can you ..." / "..., Ali?"
-_ANY_ROLL = re.compile(r"(?<!\w)\d{2}\s*k\s*-?\s*\d{4}(?!\w)", re.IGNORECASE)
-_VOCATIVE = re.compile(
-    r"^\s*([A-Za-z]{2,15}|[\u0600-\u06ff]{2,15})\s*[,\u060c]\s*"
-    r"(?:can|could|will|would|what|why|how|when|where|which|who|you|please|tell|explain|answer|"
-    r"batao|kya|aap|tum)\b", re.IGNORECASE)
-_TRAILING_NAME = re.compile(r",\s*([A-Z][a-z]{2,14})\s*[?.!]?\s*$")
-_NOT_A_NAME = {
-    "so", "okay", "ok", "now", "well", "yes", "no", "right", "alright", "and", "but", "then", "also",
-    "next", "see", "look", "first", "second", "third", "for", "if", "as", "because", "actually",
-    "basically", "suppose", "let", "listen", "tell", "please", "hello", "hi", "sir", "guys",
-    "students", "class", "everyone", "everybody", "anyone", "anybody", "sorry", "thanks", "thank",
-}
-
-
 def _sentences(text) -> list:
     return [p.strip() for p in re.split(r"(?<=[.?!\u061f\u06d4\u0964])\s+", str(text or "").strip()) if p.strip()]
 
@@ -158,6 +145,37 @@ def _parse_caption_blocks(raw) -> list:
     return blocks
 
 
+def _split_leading_name(speaker, text, names):
+    """Some Meet layouts hand over 'Ali Raza what is NP' with the name not on its own line. If a name we
+    already know from earlier captions opens the text, split it off as the speaker."""
+    if speaker:
+        return speaker, text
+    for name in sorted({n for n in names if n}, key=len, reverse=True):
+        if text.casefold().startswith(name.casefold() + " "):
+            return name, text[len(name):].strip()
+    return speaker, text
+
+
+def _self_verdict(handler, sentence):
+    """addressing.Verdict for a sentence: is ME being spoken TO, spoken ABOUT, or is it unclear?"""
+    detector = getattr(handler, "detector", None)
+    judge = getattr(detector, "mention_verdict", None)
+    called = getattr(handler, "_me_called", None)
+    if callable(judge):
+        verdict = judge(sentence)
+        if verdict.role == addressing.NONE and callable(called) and called(sentence):
+            return addressing.Verdict(addressing.ADDRESS, "matched by name list")
+        return verdict
+    if callable(called) and called(sentence):
+        return addressing.Verdict(addressing.ADDRESS, "matched by name list")
+    return addressing.Verdict(addressing.NONE, "")
+
+
+def _self_names(handler):
+    student = getattr(getattr(handler, "detector", None), "student", None) or getattr(handler, "student", None) or {}
+    return [n for n in [student.get("name", ""), *(student.get("urdu_names") or [])] if n]
+
+
 class MeetHandler:
     def __init__(self, cls: Dict, config: Dict):
         self.cls      = cls
@@ -171,6 +189,16 @@ class MeetHandler:
         self.detector    = AttendanceDetector(config)
         self.captions: deque = deque(maxlen=50)
         self._question_caption_texts = {}
+        student_names = [self.student.get("name", ""), *(self.student.get("urdu_names") or [])]
+        self.speakers = SpeakerTracker(student_names)
+        window = float(self.student.get("follow_up_seconds", 20) or 20)
+        self._floor = addressing.Floor(window=window, max_followups=int(self.student.get("max_follow_ups", 2)))
+        self._recent_labeled = deque(maxlen=8)      # "Speaker: sentence" lines the AI judge reads as context
+        self._current_asker = ""
+        self._speaker_seen = False
+        self._speaker_missing = 0
+        self._speaker_debug_done = False
+        self._last_raw_captions = []
         self._seen_chat_message_set = set()
         self._pending_live_question = ""
         self._pending_live_question_at = 0.0
@@ -321,6 +349,10 @@ class MeetHandler:
         hint += ". آپ مجھے بتائیں۔"
         return hint[:400]
 
+    def _active_speaker(self) -> str:
+        tracker = getattr(self, "speakers", None)
+        return tracker.active_speaker() if tracker is not None else ""
+
     def _queue_whisper_speech(self, text, source):
         self._whisper_speech.put((text, source))
 
@@ -331,24 +363,28 @@ class MeetHandler:
             except queue.Empty:
                 break
             if self.recorder is not None:
-                self.recorder.add_audio_transcript(text)
+                self.recorder.add_audio_transcript(text, self._active_speaker())
         while True:
             try:
                 text, source = self._whisper_speech.get_nowait()
             except queue.Empty:
                 break
+            speaker = self._active_speaker()             # whoever Meet's captions say is talking right now
             if source == "microphone":
-                self._handle_microphone_transcript(text)
-            else:                       # the teacher's audio: listen for my name / roll number
+                self._handle_microphone_transcript(text, speaker)
+            else:                       # the meeting audio: listen for my name / roll number
                 for sentence in _sentences(text):
-                    self._process_sentence(sentence)
+                    self._process_sentence(sentence, speaker)
 
-    def _handle_microphone_transcript(self, text):
+    def _handle_microphone_transcript(self, text, speaker=""):
         """The microphone also hears the speakers/room, so it gets the SAME rule as captions:
         answer only when my full name or roll number is called — never just because a question
         was heard."""
         for sentence in _sentences(" ".join(str(text or "").split())):
-            self._process_sentence(sentence)
+            if speaker:
+                self._process_sentence(sentence, speaker)
+            else:
+                self._process_sentence(sentence)
 
     def _me_called(self, text) -> bool:
         check = getattr(self.detector, "is_addressed", None)
@@ -356,11 +392,11 @@ class MeetHandler:
             return bool(check(text))
         return bool(self.detector.is_name_mentioned(text) or self.detector.is_roll_mentioned(text))
 
-    def _log_class_question(self, question, to_me=False, answer="", answered_by=""):
+    def _log_class_question(self, question, to_me=False, answer=""):
         recorder = getattr(self, "recorder", None)
         if recorder is not None and hasattr(recorder, "add_question"):
             try:
-                recorder.add_question(question, to_me=to_me, answer=answer, answered_by=answered_by)
+                recorder.add_question(question, to_me=to_me, answer=answer)
             except Exception as e:
                 logger.debug(f"[Meet] Could not remember class question: {e!r}")
 
@@ -707,8 +743,22 @@ class MeetHandler:
                     for (const container of document.querySelectorAll(selector)) {
                         const children = [...container.children]
                             .filter(child => (child.innerText || '').trim());
+                        // 'Name\\ntext'. If the layout puts name and text on one line, rebuild it from the
+                        // leaf elements: the first short leaf is the speaker's name.
+                        const labelled = child => {
+                            const raw = (child.innerText || '').trim();
+                            if (raw.includes('\\n')) return raw;
+                            const leaves = [...child.querySelectorAll('*')]
+                                .filter(e => !e.children.length && (e.textContent || '').trim())
+                                .map(e => e.textContent.trim());
+                            if (leaves.length >= 2 && leaves[0].length <= 40
+                                && leaves[0].split(/\\s+/).length <= 4 && !/[.?!\u061f]$/.test(leaves[0])) {
+                                return leaves[0] + '\\n' + leaves.slice(1).join(' ');
+                            }
+                            return raw;
+                        };
                         const lines = (children.length ? children : [container])
-                            .map(child => child.innerText.trim())
+                            .map(child => labelled(child))
                             .filter(text => text && !isUi(text));
                         if (lines.length) return lines;
                     }
@@ -717,7 +767,44 @@ class MeetHandler:
             }""", selectors)
         except Exception:
             return []
-        return _parse_caption_blocks(raw)
+        self._last_raw_captions = list(raw or [])[:4]
+        tracker = getattr(self, "speakers", None)
+        known = [*(tracker.names(include_self=True) if tracker is not None else []), "You"]
+        return [_split_leading_name(sp, tx, known) for sp, tx in _parse_caption_blocks(raw)]
+
+    async def _audit_speaker_labels(self, blocks):
+        """Warn (once) when captions arrive WITHOUT speaker names, and save the raw caption markup so the
+        selector can be fixed. Without names the bot cannot tell people apart."""
+        if not blocks or self._speaker_debug_done:
+            return
+        if any(speaker for speaker, _ in blocks):
+            self._speaker_seen = True
+            return
+        if self._speaker_seen:
+            return
+        self._speaker_missing += 1
+        if self._speaker_missing < 25:
+            return
+        self._speaker_debug_done = True
+        logger.warning(
+            "[Meet] Captions are arriving WITHOUT speaker names, so the bot cannot tell who said what. "
+            "Saved the raw caption markup to logs/caption_dom_debug.json - send it to fix the selector."
+        )
+        try:
+            html = await self.page.evaluate("""(selectors) => {
+                for (const selector of selectors) {
+                    const el = document.querySelector(selector);
+                    if (el) return el.outerHTML.slice(0, 6000);
+                }
+                return '';
+            }""", list(dict.fromkeys([MEET["caption_container"], *MEET["caption_fallbacks"]])))
+            import json
+            Path("logs").mkdir(exist_ok=True)
+            Path("logs/caption_dom_debug.json").write_text(
+                json.dumps({"raw_blocks": self._last_raw_captions, "html": html}, ensure_ascii=False, indent=1),
+                encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"[Meet] could not save caption markup: {e!r}")
 
     async def _send_present(self, tg, cls, state, how: str) -> bool:
         """Send "Present Sir". Marks attendance ONLY if it was really sent; otherwise
@@ -750,8 +837,11 @@ class MeetHandler:
         if not state.get("attendance_marked"):
             logger.info(f"[Meet] {request['how']} — sending Present Sir")
             await self._send_present(tg, cls, state, request["how"])
-        else:
-            logger.info("[Meet] Attendance already marked - not answering the roll call again.")
+        elif request["explicit"] and _time.time() - self._last_present_sent >= 20:
+            # Already marked, but the teacher is calling ME during attendance: answer again.
+            if await self.send_chat("Present Sir"):
+                self._last_present_sent = _time.time()
+                logger.info("[Meet] Called by name/roll number during attendance — sent Present Sir again")
 
     async def check_and_respond(self, tg, cls, state):
         already_sent = state.get("attendance_marked")
@@ -765,6 +855,7 @@ class MeetHandler:
 
         # Read captions once so attendance detection and notes use the same text.
         blocks = await self._read_caption_blocks()
+        await self._audit_speaker_labels(blocks)
         cap = " ".join(f"{speaker} {text}".strip() for speaker, text in blocks)
         if not self._caption_check_started:
             self._caption_check_started = _time.time()
@@ -826,10 +917,6 @@ class MeetHandler:
 
     def _check_for_addressed_question(self, blocks):
         now = _time.time()
-        recall = getattr(self, "_recall", None)
-        if recall and now - recall[0] >= 4:              # my name was called, no new question came
-            self._recall = None
-            self._queue_live_answer(recall[1])
         if now - self._pending_live_question_at > 90:
             self._pending_live_question = ""
         if now - self._pending_name_at > 45:
@@ -847,15 +934,22 @@ class MeetHandler:
             self._question_caption_texts[key] = text
             if not delta.strip():
                 continue
+            if speaker:
+                self.speakers.observe(speaker, now, words=len(delta.split()))
+                if not previous or not (text.startswith(previous) or previous.startswith(text)):
+                    self.speakers.new_turn(speaker)
 
             for sentence in _sentences(text)[-2:]:
-                self._process_sentence(sentence)
+                self._process_sentence(sentence, speaker)
 
-    def _process_sentence(self, sentence):
-        """Answer ONLY when I am called by full name / roll number.
+    def _process_sentence(self, sentence, speaker=""):
+        """Decide whether this sentence is something I must answer.
 
-        Every question heard in class is remembered for the notes, but a question put to
-        another student is never answered.
+        The bot answers ONLY when it is spoken TO: my full name / roll number used as a call-on
+        ("Saad Naeem, what is NP?"), or a clear follow-up from the SAME person who just spoke to me.
+        Being talked ABOUT ("Saad Naeem gave a good answer"), questions for other people, and my own
+        voice never trigger an answer. Genuinely unclear cases go to the AI judge, which fails closed.
+        Every question heard is still remembered for the notes.
         """
         now = _time.time()
         memory = self.__dict__.setdefault("_question_memory", [])
@@ -863,7 +957,14 @@ class MeetHandler:
         sentence = " ".join(str(sentence or "").split())
         if not sentence:
             return
-        addressed = self._me_called(sentence)
+        speaker = " ".join(str(speaker or "").split())
+        tracker = getattr(self, "speakers", None)
+        floor = self.__dict__.setdefault("_floor", addressing.Floor())
+        own_voice = bool(speaker and tracker is not None and tracker.is_self(speaker)
+                         and getattr(self, "features", {}).get("ignore_own_voice", True))
+
+        verdict = _self_verdict(self, sentence)
+        role = verdict.role
         folded = _norm(sentence)
         has_wh = bool(_WH_WORD.search(folded))
         prompt_like = bool(_ANSWER_PROMPT.search(folded) or _CALL_ON.search(folded))
@@ -872,74 +973,79 @@ class MeetHandler:
         recent = self.__dict__.setdefault("_recent_sentences", deque(maxlen=6))
         if sentence not in recent:
             recent.append(sentence)
+            self.__dict__.setdefault("_recent_labeled", deque(maxlen=8)).append(
+                f"{speaker or 'Unknown'}: {sentence}")
         if real_question and all(q != sentence for _, q in memory):
             memory.append((now, sentence))
             self._log_class_question(sentence)           # remembered for the notes only
-        in_window = bool(self._pending_name_at and now - self._pending_name_at <= 20)
-        # After I was asked something the teacher often fires follow-ups without repeating my
-        # name; keep answering for a while, until another student is called.
-        in_followup = now < getattr(self, "_followup_until", 0.0)
-        if in_followup and not addressed and MeetHandler._calls_someone_else(self, sentence):
-            self._followup_until = 0.0
-            self._pending_name_at = 0.0
-            in_window = in_followup = False
-            self._recall = None
-            logger.info("[Meet] Teacher moved on to another student; follow-up answering paused.")
-        MeetHandler._attendance_from_speech(self, sentence, addressed,
-                                            real_question or (prompt_like and MeetHandler._self_contained(self, folded)), now)
+
+        others = tracker.names() if tracker is not None else []
+        other_directed = addressing.directed_to_other(sentence, others, _self_names(self))
+
+        MeetHandler._attendance_from_speech(
+            self, sentence, (role == addressing.ADDRESS and not own_voice),
+            real_question or (prompt_like and MeetHandler._self_contained(self, folded)), now)
+
+        self._current_asker = speaker
         handled = False
-        if addressed:
+        ai_check = getattr(self, "_ai_check_question", None)
+
+        if own_voice:
+            if floor.open_:
+                floor.close()                            # I am speaking: nobody is waiting on my bot
+            return
+
+        # somebody else started talking about something else: the conversation with me is over
+        if (floor.open_ and speaker and floor.speaker and not addressing.same_speaker(speaker, floor.speaker)
+                and len(sentence.split()) >= 3 and role != addressing.ADDRESS):
+            floor.close()
+            self._pending_name_at = 0.0
+
+        if role == addressing.ADDRESS:
+            floor.open(speaker, now)
             self._pending_name_at = now
+            memory_age = now - memory[-1][0] if memory else 1e9
             if real_question:
                 question = sentence
             elif prompt_like and MeetHandler._self_contained(self, folded):   # "24K3074, tell me X and Y"
                 question = sentence
-            elif memory and MeetHandler._can_recall(self, memory[-1], now) and (
-                    prompt_like or not MeetHandler._self_contained(self, folded)):
-                # "Saad Naeem, you answer" / just "Saad Naeem?" -> the teacher means the question that
-                # was asked a moment ago (e.g. to a student who stayed silent), without repeating it.
+            elif prompt_like and memory and memory_age <= 60:    # "Saad Naeem, you answer"
                 question = memory[-1][1]
-                if not prompt_like:                      # bare call: wait a beat for a NEW question
-                    self._recall = (now, question)
-                    question = ""
-                    handled = True
             else:
                 question = ""                            # roll call / name mention / unclear
             if question:
                 self._queue_live_answer(question)
                 handled = True
-        elif real_question and (in_window or in_followup):
-            self._pending_name_at = 0.0                  # question right after my name / follow-up
-            self._recall = None                          # a fresh question beats the remembered one
-            self._queue_live_answer(sentence)
-            handled = True
-        if not handled and (addressed or in_window or in_followup):
-            # The word lists did not recognise a question (Urdu captions often have no "؟" and
-            # use many phrasings), so let the AI decide - works for Urdu, English or a mix.
-            ai_check = getattr(self, "_ai_check_question", None)
+            elif callable(ai_check):
+                # the word lists did not recognise a question (Urdu captions often have no "?")
+                ai_check(sentence, True)
+            return
+
+        if role == addressing.AMBIGUOUS:
+            # my name is in the sentence but the words do not say whether it is a call-on
             if callable(ai_check):
-                ai_check(sentence, addressed)
+                ai_check(sentence, True)
+            return
 
-    def _can_recall(self, item, now) -> bool:
-        """May I answer this remembered question now? Recent, not answered yet, and not in the
-        middle of an unmarked roll call."""
-        when, question = item
-        if now - when > 120 or self._is_recent_duplicate(question, now):
-            return False
-        in_mode = now < getattr(self, "_attendance_mode_until", 0.0)
-        return bool(getattr(self, "_attendance_marked", False) or not in_mode)
+        if role == addressing.REFERENCE:
+            # someone is talking ABOUT me; this is never a question for me
+            return
 
-    def _calls_someone_else(self, sentence) -> bool:
-        sentence = " ".join(str(sentence or "").split())
-        if self._me_called(sentence):
-            return False
-        if _ANY_ROLL.search(sentence):
-            return True
-        match = _VOCATIVE.match(sentence)
-        if match:
-            return match.group(1).lower() not in _NOT_A_NAME
-        tail = _TRAILING_NAME.search(sentence)
-        return bool(tail and tail.group(1).lower() not in _NOT_A_NAME)
+        # no mention of me at all: only a genuine follow-up from the person I am talking with counts
+        if real_question and floor.open_:
+            decision = floor.decide(speaker, sentence, now, other_directed)
+            if decision == "accept":
+                floor.followups += 1
+                floor.refresh(now)
+                self._queue_live_answer(sentence)
+            elif decision == "maybe" and callable(ai_check):
+                ai_check(sentence, False)
+            elif other_directed:
+                floor.close()
+                self._pending_name_at = 0.0
+        elif other_directed and floor.open_:
+            floor.close()
+            self._pending_name_at = 0.0
 
     def _attendance_from_speech(self, sentence, addressed, question_like, now):
         """Attendance heard in ANY language/source:
@@ -973,8 +1079,8 @@ class MeetHandler:
         return len(words) >= 3
 
     def _ai_check_question(self, sentence, addressed):
-        if not self._answers_enabled():
-            return
+        if not getattr(self, "features", {}).get("answer_questions", True):
+            return                                   # no replies wanted: do not spend AI calls judging
         if len(sentence.split()) < (4 if addressed else 3):   # bare name / filler: wait for more
             return
         if not ai_notes.api_key(self.config):
@@ -987,12 +1093,12 @@ class MeetHandler:
         for task in (self._ai_check_task, self._question_answer_task):
             if task and not task.done():
                 return
-        lines = list(self._recent_sentences)[-3:]
+        lines = list(self._recent_labeled)[-6:] or list(self._recent_sentences)[-3:]
         key = " ".join(lines)
         if key in self._ai_checked:
             return
         try:
-            task = asyncio.create_task(self._ai_extract_question(lines))
+            task = asyncio.create_task(self._ai_extract_question(lines, bool(addressed)))
         except RuntimeError:                              # no running event loop
             return
         if len(self._ai_checked) > 200:
@@ -1001,18 +1107,25 @@ class MeetHandler:
         self._ai_calls += 1
         self._ai_check_task = task
 
-    async def _ai_extract_question(self, lines):
+    async def _ai_extract_question(self, lines, addressed=True):
+        floor = self._floor
         try:
             question = await asyncio.to_thread(
                 ai_notes.extract_addressed_question, self.config, lines,
                 str(self.student.get("name", "")),
+                roll_no=str(self.student.get("roll_no", "")),
+                roster=self.speakers.names(),
+                floor_open=bool(floor.open_ and not floor.expired(_time.time())),
+                asker=self._current_asker,
             )
         except Exception as e:
             logger.error(f"[Meet] AI question check failed: {e}")
             return
         if question:
-            logger.info(f"[Meet] AI recognised a question addressed to me: {question}")
+            logger.info(f"[Meet] AI judged this question is addressed to me: {question}")
             self._queue_live_answer(question)
+        else:
+            logger.debug("[Meet] AI judge: not addressed to me - staying silent.")
 
     def _check_for_addressed_chat_questions(self, messages):
         for message in messages:
@@ -1023,6 +1136,8 @@ class MeetHandler:
             if normalized in self._sent_chat_norms:       # something I typed myself
                 continue
             if self._me_called(normalized):
+                if _self_verdict(self, normalized).role == addressing.REFERENCE:
+                    continue                  # "did Saad Naeem answer?" is about me, not to me
                 folded = _norm(normalized)
                 if _QUESTION_CUE.search(folded) or _ANSWER_PROMPT.search(folded):
                     self._queue_live_answer(message)
@@ -1046,27 +1161,21 @@ class MeetHandler:
                 return True
         return False
 
-    def _answers_enabled(self) -> bool:
-        return bool((getattr(self, "features", None) or {}).get("answer_questions", True))
-
     def _queue_live_answer(self, question):
-        if not self._answers_enabled():
-            # Preference is OFF: stay silent, but still remember the question for the notes.
-            if not getattr(self, "_answers_off_logged", False):
-                logger.info("[Meet] 'Answer questions in chat' is OFF - not replying (questions are still noted).")
-                self._answers_off_logged = True
-            self._log_class_question(question, to_me=True)
-            return
+        if not getattr(self, "features", {}).get("answer_questions", True):
+            # Replies are switched off in Settings. Attendance ("Present") is a separate path and is
+            # untouched; but a QUESTION to me is not a roll call, so cancel a pending 'Roll call'.
+            request = getattr(self, "_present_request", None)
+            if request and request.get("delay"):
+                self._present_request = None
+            self._log_class_question(question, to_me=True)        # still shown in the notes
+            return False
         now = _time.time()
         normalized = " ".join(re.sub(r"\W+", " ", question.casefold()).split())
         if not normalized or normalized == self._last_queued_question:
             return
         if self._question_answer_task and not self._question_answer_task.done():
-            # a follow-up arrived while the previous answer is being written: answer it next
-            deferred = self.__dict__.setdefault("_deferred_questions", [])
-            if len(deferred) < 2 and all(normalized != d[0] for d in deferred):
-                deferred.append((normalized, question))
-                logger.info("[Meet] Follow-up question queued; answering it right after this one.")
+            logger.debug("[Meet] A live question is already being answered; skipping duplicate.")
             return
         # The teacher's voice reaches me through captions, the microphone AND the meeting audio,
         # each spelling it differently - so after one answer ignore repeats for a short while.
@@ -1080,33 +1189,27 @@ class MeetHandler:
         request = getattr(self, "_present_request", None)
         if request and request.get("delay"):          # it was a question, not a roll call
             self._present_request = None
-        self._answer_block_until = now + 8          # only to swallow the same sentence heard twice
-        self._followup_until = now + 75             # keep listening for follow-ups
+        self._answer_block_until = now + 25
         self._recent_answered.append((now, self._topic_words(question)))
         self._log_class_question(question, to_me=True)
         self._pending_live_question = ""
         self._pending_live_question_at = 0.0
         self._pending_name_at = 0.0
+        asker = getattr(self, "_current_asker", "")
+        self._answer_asker = asker
+        floor = self._floor
+        if asker:
+            # keep the conversation open for a short, strict follow-up from the SAME person
+            if floor.open_ and addressing.same_speaker(floor.speaker, asker):
+                floor.refresh(now)
+            else:
+                floor.open(asker, now)
+        else:
+            floor.close()
         self._question_answer_task = asyncio.create_task(self._answer_live_question(question))
-
-    def _pop_deferred(self):
-        deferred = self.__dict__.get("_deferred_questions") or []
-        if deferred:
-            _, question = deferred.pop(0)
-            self._answer_block_until = 0.0
-            self._queue_live_answer(question)
+        return True
 
     async def _answer_live_question(self, question):
-        try:
-            await self._answer_live_question_inner(question)
-        finally:
-            if self.__dict__.get("_deferred_questions"):
-                try:
-                    asyncio.get_running_loop().call_later(0.5, self._pop_deferred)
-                except RuntimeError:
-                    pass
-
-    async def _answer_live_question_inner(self, question):
         if not ai_notes.api_key(self.config):
             if not self._missing_question_key_logged:
                 logger.warning(
@@ -1121,24 +1224,23 @@ class MeetHandler:
             context = "\n".join(self.captions)
         context = context[-2500:]        # recent lecture only: a huge prompt makes the reply very slow
         try:
+            extra = {}
+            asker = getattr(self, "_answer_asker", "")
+            if asker:
+                extra["asker"] = asker
             answer = await asyncio.to_thread(
-                ai_notes.answer_question, self.config, context, question, None, True
+                ai_notes.answer_question, self.config, context, question, None, True, **extra
             )
             if not answer:
                 logger.warning("[Meet] The AI provider could not answer the live question.")
                 return
             if len(answer) > 1600:
                 answer = answer[:1597].rsplit(" ", 1)[0] + "..."
-            who = dict(getattr(ai_notes, "LAST_LIVE_REPLY", {}) or {})
-            by = (f"{who.get('provider', '?').title()} ({who.get('model', '?')})"
-                  if who.get("provider") else "unknown provider")
             if not await self.send_chat(answer):
                 logger.error("[Meet] Could not send the live question answer to meeting chat.")
             else:
-                logger.info(f"[Meet] Answer written by {by} in {who.get('seconds', 0):.1f}s")
-                self._log_class_question(question, to_me=True, answer=answer,
-                                         answered_by=who.get("provider", ""))
-            self._answer_block_until = max(self._answer_block_until, _time.time() + 4)
+                self._log_class_question(question, to_me=True, answer=answer)
+            self._answer_block_until = max(self._answer_block_until, _time.time() + 15)
         except Exception as e:
             logger.error(f"[Meet] Live question answering failed: {e}")
 

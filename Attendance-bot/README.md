@@ -4,6 +4,57 @@ Windows 11 · Local Machine · NVIDIA GPU Supported
 
 ---
 
+## What's new: smarter addressing, speaker awareness, real meeting notes
+
+Fixes for what went wrong when the bot was tried in a meeting with friends.
+
+**1. The bot now has a "brain" before it answers** (`detection/addressing.py`)
+- It tells apart your name being *called* ("Saad Naeem, what is NP?") from being *talked about*
+  ("Saad Naeem or 24K-3074 gave a good answer", "did Saad Naeem answer?", "ask Saad Naeem", "thanks to 24K3074").
+  Talked-about mentions never trigger an answer and never count as a roll call.
+- Unclear cases ("I think Saad Naeem what is NP is tricky") go to an AI judge that reads the last few lines **with
+  speaker names**, the participant list and whether a conversation with you is open. It fails closed: if it is not
+  clearly sure, the bot stays silent.
+- **Follow-ups are strict now.** After you are called, only the *same person* can follow up, within 20 s, at most 2 times,
+  and only if they have not turned to somebody else ("Ali, ..."). A different person speaking, or another name being
+  called, ends the conversation. Unknown speaker + no clear "and why..."-style continuation = no answer.
+- **Replies can be switched off** (Settings → *Reply in chat to questions asked to me*, `features.answer_questions`). Attendance is a separate path: with replies off the bot still sends "Present" for the attendance keyword, a bare roll call and "attendance + your name". A question aimed at you is never mistaken for a roll call, is still listed in the notes, and costs no AI calls.
+- The bot ignores your own voice (Meet's "You" speaker). Toggle: Settings → *Never answer my own voice*.
+- Optional tuning in `config/schedule.json` → `student`: `"follow_up_seconds": 20`, `"max_follow_ups": 2`,
+  `"respond_to_first_name": false`.
+
+**2. Speaker awareness** (`utils/speakers.py`)
+- Meet's caption speaker names are tracked as a roster. Local Whisper audio (which has no speaker info) is attributed
+  to whoever's captions were moving at that moment; with overlapping speakers it is left *unattributed* rather than guessed.
+- Interleaved conversation keeps chronological order in the transcript (a person's continuation no longer gets glued
+  onto their earlier line, before someone else's reply).
+- If captions arrive with **no** speaker names, the bot warns once and saves the raw caption markup to
+  `logs/caption_dom_debug.json` so the selector can be fixed.
+- Limits: if several people share one microphone/device, Meet sees one speaker. Ask each person to join from their own device.
+
+**3. Meeting notes that follow the transcript** (Settings → *Session type*: Auto / Class / Meeting)
+- Auto picks *meeting* when the title looks like one or several people share the talking; otherwise *class*.
+- Meeting notes are speaker-attributed minutes: topics, who said what, decisions, action items, open questions.
+  The prompt forbids outside knowledge and **every statement must cite a real transcript timestamp**; anything that
+  does not is deleted automatically. No grounded content left = no invented notes, only the transcript digest.
+- The PDF/markdown get meeting wording (Participants, Who said what, Action items...) instead of "Homework / Exam radar".
+
+- **Notes content** (Settings → *Notes content*, `features.notes_scope`): `discussed` = notes of ONLY what was said, with
+  nothing added by the AI; `study` = the original study notes (explanations, quiz, exam tips); `auto` (default) uses
+  `discussed` for meetings and `study` for classes. In `discussed` mode the only thing the AI may add is something so
+  obvious that leaving it out would confuse the reader (e.g. spelling out an acronym), marked "(note: ...)". It also
+  skips the AI-written answers to questions and the quiz / exam questions; the bot's real chat replies are kept, and
+  every point still has to cite a real transcript time or it is deleted. This applies to Regenerate notes too.
+- **Regenerate notes now keeps the slides.** It runs the same pipeline as the end-of-class job: slide/snapshot pages
+  with their screenshots and per-slide notes, the questions asked (with the bot's replies), flagged moments and, for
+  conversations, the meeting minutes. New recordings save `slides.json` next to `transcript.md`; older lecture folders
+  are rebuilt from `slides/slide_NNN.jpg` plus the `### Slide N` markers in `transcript.md` (those older captures
+  cannot tell a snapshot from a slide, so they show as slides). The optional "instructions" box applies to the notes.
+
+Run `python -m pytest tests` (187 tests) after changes.
+
+---
+
 ## What's new in this version
 
 **Dashboard (http://localhost:5000) is now the control panel** — no more editing JSON by hand:
@@ -362,29 +413,3 @@ sounddevice==0.4.6          WASAPI loopback audio capture
 - Every question heard in class is remembered and added to the notes ("Questions Asked in
   Class" page in notes.pdf, section in transcript.md, `class_questions.json`), with the
   answer — your bot's chat reply if it answered, otherwise an AI answer from the lecture.
-
-## Follow-ups, memory and notes (latest)
-
-- After you are called, follow-up questions are answered for 75 s **without repeating your name**,
-  until the teacher calls another student (name or roll number).
-- If a question was asked to someone else and the teacher then says just "Saad Naeem?" (or "you
-  answer"), the bot answers the remembered question.
-- Each live reply is logged as `Answer written by <provider> (<model>)` and shown in the notes.
-  A provider that returns 401/402/403 (bad key / no balance) is skipped for 20 minutes.
-- Notes are written in plain English (Urdu/Hindi is translated, including quoted key moments);
-  diagram labels are kept short; the slide overview fits one page; the question list is cleaned
-  (statements, noise and duplicates removed) before it goes into the PDF.
-
-## Live answers use Groq first
-
-Live chat answers go to Groq (fastest) when a Groq key is saved; your main provider and any other
-saved key are automatic back-ups. Notes still use the main provider (Gemini). Change it with
-`"live_reply_provider"` under `features` in schedule.json (`groq`, `gemini`, `deepseek`,
-`anthropic` or `auto` = main provider).
-
-## Answer-questions switch and attendance
-
-- Dashboard → Settings → **Answer questions in chat** (on by default). Off = the bot never replies
-  to the teacher's questions, but every question is still saved in the notes.
-- Attendance is separate: "Present Sir" is sent once, and once attendance is marked the bot never
-  answers a roll call again (even when the teacher repeats it or calls your name).

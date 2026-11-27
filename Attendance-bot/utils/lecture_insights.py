@@ -85,3 +85,23 @@ def fmt_dur(seconds: float) -> str:
     if m:
         return f"{m}m {sec:02d}s"
     return f"{sec}s"
+
+
+def speaker_digest(segments, per_speaker: int = 6, max_chars: int = 220):
+    """Offline 'who said what': for every identified speaker, their longest lines in time order.
+    Used in the PDF even when no AI key is available, so a conversation is never reduced to nothing."""
+    by_speaker = {}
+    for seg in segments:
+        label = getattr(seg, "speaker", "") or ""
+        if not label or label.startswith("Local audio") or label.lower().startswith("unattributed"):
+            continue
+        by_speaker.setdefault(label, []).append(seg)
+    digest = []
+    for label, items in by_speaker.items():
+        longest = sorted(items, key=lambda x: -len(x.text.split()))[:per_speaker]
+        longest.sort(key=lambda x: x.ts)
+        digest.append({
+            "speaker": label,
+            "lines": [(x.ts.strftime("%H:%M:%S"), x.text[:max_chars]) for x in longest],
+        })
+    return sorted(digest, key=lambda d: -len(d["lines"]))

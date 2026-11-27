@@ -30,7 +30,6 @@ DEFAULT_FEATURES = {
     "notes": True,            # save lecture transcript to notes/
     "ai_summary": True,       # LLM summary at class end (needs API key)
     "called_alert": True,     # sound + popup when your name is called
-    "answer_questions": True, # answer in meeting chat when the teacher asks YOU a question (attendance is separate)
     "slides": True,           # capture slides + build PDF with notes
     "whisper_transcription": True,  # local transcription of microphone input and meeting playback
     "slide_mode": "auto",     # auto | always | off
@@ -38,9 +37,12 @@ DEFAULT_FEATURES = {
     "keyframe_interval": 30,  # snapshot every N sec while the screen is a video/whiteboard (0 = off)
     "caption_language": "urdu",   # urdu | english | keep (leave Meet's own setting alone)
     "notes_language": "English",  # legacy: notes are ALWAYS written in English now (this value is ignored)
-    "live_reply_provider": "groq",  # who writes LIVE chat answers (fast): groq | gemini | deepseek | anthropic | auto (= main provider)
     "reply_language": "auto",  # live chat replies: auto (match the teacher's language) | English | Urdu | Roman Urdu
     "pdf_detail": "detailed",  # concise | detailed
+    "session_mode": "auto",   # auto | class (teacher + students) | meeting (peers talking to each other)
+    "notes_scope": "auto",    # auto (meeting: discussed, class: study) | discussed (only what was said) | study (adds explanations, quiz, exam tips)
+    "answer_questions": True,  # reply in chat to questions asked to me (attendance / "Present" is separate)
+    "ignore_own_voice": True,  # never answer something said by the "You" speaker (my own microphone)
     "pdf_include_transcript": False,  # full captions are also saved separately in transcript.md
     "pdf_paper_size": "A4",  # A4 | Letter
 }
@@ -51,6 +53,8 @@ PROVIDERS = {
     "gemini":    {"label": "Google Gemini",      "model": "gemini-2.5-flash",  "env": "GEMINI_API_KEY"},
 }
 CAPTION_LANGS = ("urdu", "english", "keep")
+SESSION_MODES = ("auto", "class", "meeting")
+NOTES_SCOPES = ("auto", "discussed", "study")
 NOTES_LANGS = ("English", "Urdu", "Roman Urdu")
 REPLY_LANGS = ("auto",) + NOTES_LANGS
 
@@ -193,6 +197,16 @@ def update_settings(data: Dict) -> None:
                 if ft["reply_language"] not in REPLY_LANGS:
                     raise ValueError("Reply language must be auto, English, Urdu or Roman Urdu")
                 cur["reply_language"] = ft["reply_language"]
+            if "notes_scope" in ft:
+                if ft["notes_scope"] not in NOTES_SCOPES:
+                    raise ValueError("Notes content must be auto, discussed or study")
+                cur["notes_scope"] = ft["notes_scope"]
+            if "session_mode" in ft:
+                if ft["session_mode"] not in SESSION_MODES:
+                    raise ValueError("Session type must be auto, class or meeting")
+                cur["session_mode"] = ft["session_mode"]
+            if "ignore_own_voice" in ft:
+                cur["ignore_own_voice"] = bool(ft["ignore_own_voice"])
             if "pdf_detail" in ft:
                 if ft["pdf_detail"] not in ("concise", "detailed"):
                     raise ValueError("PDF note detail must be concise or detailed")

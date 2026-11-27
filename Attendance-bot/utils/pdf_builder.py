@@ -78,31 +78,25 @@ section.page:last-of-type { break-after: auto; }
 .glossary th { color: #047857; background: #ecfdf5; font-weight: 750; }
 .glossary tbody tr:nth-child(even) { background: #f8fafc; }
 .glossary td:first-child { width: 30%; color: #047857; font-weight: 750; }
-.diagram { margin: 16px 0; padding: 16px 20px 18px; border: 1px solid #c7d2fe; border-radius: 11px;
+.diagram { margin: 11px 0; padding: 12px 14px; border: 1px solid #c7d2fe; border-radius: 11px;
   background: linear-gradient(135deg, #f8faff, #f0fdfa); break-inside: avoid;
   box-shadow: 0 2px 8px rgba(49, 46, 129, .07); }
-.diagram-title { margin-bottom: 14px; color: #4338ca; font-size: 8pt; font-weight: 800;
+.diagram-title { margin-bottom: 10px; color: #4338ca; font-size: 8pt; font-weight: 800;
   letter-spacing: .08em; text-transform: uppercase; }
-.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px 18px;
-  counter-reset: step; }
-.flow-node { position: relative; display: flex; align-items: center; justify-content: center; min-height: 48px;
-  padding: 10px 14px 10px 38px; border: 1px solid #c7d2fe; border-radius: 8px; background: #fff;
-  color: #3730a3; text-align: center; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere;
-  box-shadow: 0 1px 3px rgba(49, 46, 129, .08); }
-.flow-node::before { counter-increment: step; content: counter(step); position: absolute; left: 10px; top: 50%;
-  transform: translateY(-50%); width: 20px; height: 20px; border-radius: 50%; background: #312e81; color: #fff;
-  font-size: 8pt; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-.flow.analogy .flow-node { padding-left: 14px; } .flow.analogy .flow-node::before { display: none; }
-.flow-arrow { display: none; }
-.tree-root { width: fit-content; max-width: 90%; margin: 0 auto 14px; padding: 9px 18px; border-radius: 8px;
+.flow { display: flex; align-items: stretch; justify-content: center; gap: 7px; flex-wrap: wrap; }
+.flow-node { flex: 1 1 105px; display: flex; align-items: center; justify-content: center; min-height: 42px;
+  padding: 7px 9px; border: 1px solid #c7d2fe; border-radius: 8px; background: #fff;
+  color: #3730a3; text-align: center; font-weight: 700; box-shadow: 0 1px 3px rgba(49, 46, 129, .08); }
+.flow-arrow { align-self: center; color: #7c3aed; font-size: 13pt; font-weight: 900; }
+.tree-root { width: fit-content; margin: 0 auto 11px; padding: 7px 14px; border-radius: 8px;
   background: #312e81; color: white; text-align: center; font-weight: 750; }
-.tree-branches { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; padding-top: 14px;
+.tree-branches { display: flex; justify-content: center; gap: 8px; padding-top: 9px;
   border-top: 2px solid #a5b4fc; }
-.tree-branch { flex: 1 1 150px; min-width: 0; padding: 10px 14px; overflow-wrap: anywhere; border-top: 3px solid #06b6d4; border-radius: 7px;
+.tree-branch { flex: 1; padding: 8px 10px; border-top: 3px solid #06b6d4; border-radius: 7px;
   background: #ecfeff; text-align: center; font-weight: 700; }
-.tree-branch ul { margin: 6px 0 0; padding-left: 18px; color: #334155; text-align: left; font-weight: 400; }
-.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.compare-group { padding: 12px 15px; overflow-wrap: anywhere; border: 1px solid #c7d2fe; border-radius: 8px;
+.tree-branch ul { margin: 4px 0 0; padding-left: 16px; color: #334155; text-align: left; font-weight: 400; }
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.compare-group { padding: 9px 11px; border: 1px solid #c7d2fe; border-radius: 8px;
   background: #eef2ff; break-inside: avoid; }
 .compare-group:nth-child(2) { background: #ecfeff; }
 .compare-group:nth-child(3) { background: #f0fdf4; }
@@ -154,12 +148,6 @@ h2.pg { font-size: 15pt; margin-bottom: 3px; } .sub { color: #64748b; font-size:
 .qa { margin-bottom: 11px; break-inside: avoid; } .qa .q { font-weight: 700; } .qa .a { color: #047857; margin-top: 2px; }
 .selftest { margin-top: 14px; break-inside: avoid; }
 .quiz-card { break-inside: avoid; }
-.grid.dense { grid-template-columns: repeat(4, 1fr); gap: 9px; }
-.grid.dense5 { grid-template-columns: repeat(5, 1fr); gap: 7px; }
-.grid.dense .cap, .grid.dense5 .cap { padding: 3px 6px; font-size: 7.5pt; }
-h2.pg { break-after: avoid; }
-.cq { margin-top: 8px; } .cq .qa { margin-bottom: 13px; padding-bottom: 9px; border-bottom: 1px solid #e2e8f0; }
-.cq .src { color: #64748b; font-size: 8pt; font-weight: 400; }
 .tr h3 { font-size: 9.5pt; margin: 12px 0 4px; color: #4338ca; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
 .tr p { font-size: 8.8pt; margin-bottom: 3px; color: #1e293b; break-inside: avoid; }
 .tr .tm { color: #94a3b8; font-family: Consolas, monospace; font-size: 8pt; margin-right: 6px; }
@@ -249,7 +237,7 @@ def _diagram(diagram: Dict) -> str:
     diagram_type = diagram.get("type")
     if diagram_type in ("process", "analogy"):
         nodes = diagram.get("nodes") or []
-        body = f'<div class="flow {"analogy" if diagram_type == "analogy" else "process"}">' + "".join(
+        body = '<div class="flow">' + "".join(
             (f'<span class="flow-arrow" aria-hidden="true">→</span>' if index else "")
             + f'<span class="flow-node" dir="auto">{_e(node)}</span>'
             for index, node in enumerate(nodes)
@@ -412,15 +400,43 @@ def _section_html(section: Dict) -> str:
     return f'<div class="card lecture">{"".join(body)}</div>'
 
 
+def _meeting_cards(ctx: Dict, summary: Dict) -> list:
+    """Participants, who-said-what and open questions: the parts that make meeting notes follow the conversation."""
+    cards = []
+    participants = ctx.get("participants") or []
+    if participants:
+        rows = "".join(
+            f'<tr><td dir="auto">{_e(p["speaker"])}</td><td>{p["turns"]}</td><td>{p["words"]}</td></tr>'
+            for p in participants)
+        cards.append('<div class="card"><h2>Participants</h2><table class="kv"><tr><th>Speaker</th><th>Turns</th>'
+                     f'<th>Words</th></tr>{rows}</table></div>')
+    elif ctx.get("speaker_labels_missing"):
+        cards.append('<div class="hint">Meet did not label who was speaking in this recording, so lines are shown without '
+                     'speaker names. Make sure Meet captions are on and each person joins from their own device.</div>')
+    by_speaker = summary.get("by_speaker") or []
+    if by_speaker:
+        body = "".join(f'<h3 dir="auto">{_e(row["speaker"])}</h3>' + _ul(row["points"]) for row in by_speaker)
+        cards.append(f'<div class="card terms"><h2>Who said what</h2>{body}</div>')
+    elif ctx.get("speaker_digest"):
+        body = "".join(
+            f'<h3 dir="auto">{_e(row["speaker"])}</h3>'
+            + _ul([f"[{t}] {x}" for t, x in row["lines"]]) for row in ctx["speaker_digest"])
+        cards.append(f'<div class="card terms"><h2>Who said what (longest lines)</h2>{body}</div>')
+    if summary.get("open_questions"):
+        cards.append('<div class="card radar"><h2>Open questions</h2>' + _ul(summary["open_questions"]) + "</div>")
+    return cards
+
+
 def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     options = options or {}
     subject, slides = lecture_title(ctx), ctx.get("slides", [])
+    meeting = ctx.get("mode") == "meeting"
     summary = ctx.get("summary") or {}
     flags = ctx.get("flags", [])
     total_s = max(1, ctx.get("duration_s", 1))
 
     subtitle = str(summary.get("subtitle") or "").strip()
-    cover = [f'<div class="hero"><div class="kicker">LECTURE STUDY NOTES</div><h1 dir="auto">{_e(subject)}</h1>'
+    cover = [f'<div class="hero"><div class="kicker">{"MEETING NOTES" if meeting else "LECTURE STUDY NOTES"}</div><h1 dir="auto">{_e(subject)}</h1>'
              + (f'<div class="subtitle" dir="auto">{_e(subtitle)}</div>' if subtitle else "")
              + f'<div class="when">{_e(ctx["date_str"])}</div></div>']
 
@@ -461,7 +477,14 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
     for d in summary.get("deadlines", []) or []:
         todo.append(f'{d.get("item", "")} — due {d.get("date", "")}' if isinstance(d, dict) else str(d))
     if todo:
-        cover.append('<div class="card todo"><h2>Homework &amp; deadlines</h2>' + _ul(todo, "check") + "</div>")
+        cover.append(f'<div class="card todo"><h2>{"Action items &amp; deadlines" if meeting else "Homework &amp; deadlines"}</h2>'
+                     + _ul(todo, "check") + "</div>")
+
+    if ctx.get("notes_scope") == "discussed" and summary:
+        cover.append('<div class="hint">These notes record only what was said in the recording. Every point cites its '
+                     'time, and nothing outside the conversation has been added.</div>')
+    if meeting:
+        cover += _meeting_cards(ctx, summary)
 
     terms = [
         term for term in (summary.get("key_terms") or [])
@@ -509,7 +532,7 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
         qr = ['<h2 class="pg">Quick reference</h2>']
         qr += [_table_html(t) for t in qr_tables]
         if stressed:
-            qr.append('<h3 class="qh">Stressed in class</h3>' + _ul(stressed))
+            qr.append(f'<h3 class="qh">{"Decisions &amp; outcomes" if meeting else "Stressed in class"}</h3>' + _ul(stressed))
         if exam_questions:
             qr.append('<h3 class="qh">Likely exam questions</h3>' + _ul(exam_questions))
         pages.append(f'<section class="page qref">{"".join(qr)}</section>')
@@ -521,9 +544,9 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             f'<b>{"Snapshot" if s["kind"] == "moment" else "Slide"} {s["n"]}</b><span>{_e(s["time"])}</span></div></a>'
             for s in slides)
         glance = (
-            '<h2 class="pg">Lecture at a glance</h2>'
-            '<div class="sub">Every slide in order — click one to jump to its notes.</div>'
-            f'<div class="grid{" dense5" if len(slides) > 24 else " dense" if len(slides) > 9 else ""}">{thumbs}</div>'
+            ('<h2 class="pg">Meeting at a glance</h2>' if meeting else '<h2 class="pg">Lecture at a glance</h2>')
+            + '<div class="sub">Every slide in order — click one to jump to its notes.</div>'
+            f'<div class="grid">{thumbs}</div>'
         )
         if not summary.get("sections") and not terms:
             cover.append(f'<div class="notes-start">{glance}</div>')
@@ -544,9 +567,9 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
                      + (f'<span dir="auto">{_e(s["takeaway"])}</span>' if s.get("takeaway")
                         else '<span>No related captions were captured during this moment.</span>') + '</div>')
         if s.get("bullets"):
-            parts.append('<div class="notes"><h3>What the teacher explained</h3>' + _ul(s["bullets"]) + "</div>")
+            parts.append(f'<div class="notes"><h3>{"What was said" if meeting else "What the teacher explained"}</h3>' + _ul(s["bullets"]) + "</div>")
         elif s.get("raw"):
-            parts.append(f'<div class="notes"><h3>What the teacher explained (captions)</h3><div class="raw" dir="auto">{_e(s["raw"])}</div></div>')
+            parts.append(f'<div class="notes"><h3>{"What was said (captions)" if meeting else "What the teacher explained (captions)"}</h3><div class="raw" dir="auto">{_e(s["raw"])}</div></div>')
         else:
             parts.append('<div class="notes none">No related explanation was captured while this was on screen.</div>')
         pages.append(f'<section class="page slide" id="s{s["n"]}">{"".join(parts)}</section>')
@@ -573,16 +596,15 @@ def build_html(ctx: Dict, options: Optional[Dict] = None) -> str:
             f'<span class="sm">{_e(q.get("time", ""))}</span>'
             + (' <span class="snapbadge">Asked to you</span>' if q.get("to_me") else "")
             + '</div>'
-            + (f'<div class="a" dir="auto"><b>{"Bot reply in chat" if q.get("bot_answer") else "Answer"}'
-               + (f' <span class="src">via {_e(str(q.get("answered_by")).title())}</span>' if q.get("bot_answer") and q.get("answered_by") else "")
-               + f':</b> {_e(q.get("answer", ""))}</div>' if q.get("answer") else "")
+            + (f'<div class="a" dir="auto"><b>{"Bot reply in chat" if q.get("bot_answer") else "Answer"}:</b> '
+               f'{_e(q.get("answer", ""))}</div>' if q.get("answer") else "")
             + '</div>'
             for i, q in enumerate(cqs, 1)
         )
         pages.append(
-            f'<section class="page cqpage"><h2 class="pg">Questions Asked in Class</h2>'
-            f'<div class="sub">Every question raised during the lecture, with its answer.</div>'
-            f'<div class="cq">{items}</div></section>'
+            f'<section class="page selftest"><h2 class="pg">{"Questions Asked in the Meeting" if meeting else "Questions Asked in Class"}</h2>'
+            f'<div class="sub">Every question raised {"in the meeting" if meeting else "during the lecture"}, with its answer.</div>'
+            f'<div class="card quiz-card">{items}</div></section>'
         )
 
     # ── transcript ──────────────────────────────────────

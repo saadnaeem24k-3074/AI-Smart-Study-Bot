@@ -382,7 +382,7 @@ class StudyNotesPdfTests(unittest.TestCase):
 
         rendered = pdf_builder.build_html(context)
 
-        self.assertIn('class="flow process"', rendered)
+        self.assertIn('<div class="flow">', rendered)
         self.assertIn("Unit</span>", rendered)
         self.assertNotIn("1. 1. Unit Testing", rendered)
         self.assertIn('<table class="glossary">', rendered)

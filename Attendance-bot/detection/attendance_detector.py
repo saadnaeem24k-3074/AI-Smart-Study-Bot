@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 
 from core.logger import setup_logger
 from utils.lang_utils import normalize_urdu
+from detection import addressing
 
 logger = setup_logger("AttendanceDetector")
 
@@ -123,9 +124,14 @@ class AttendanceDetector:
     def _is_att(self, text):
         if self.is_attendance_keyword(text):
             return True
-        # My roll number said on its own is a roll call; said inside a question it is not.
-        return (any(pattern.search(text) for pattern in ROLL_PATTERNS)
-                and not looks_like_question(text))
+        # My roll number said on its own is a roll call; said inside a question it is not, and
+        # neither is "24K3074 gave a good answer" (someone talking ABOUT me).
+        spans = [(m.start(), m.end()) for pattern in ROLL_PATTERNS for m in pattern.finditer(text)]
+        if not spans or looks_like_question(text):
+            return False
+        verdict = addressing.classify(text, spans)
+        about_me = verdict.role == addressing.REFERENCE and verdict.reason.startswith(("third-person '", "possessive"))
+        return not about_me
 
     def is_name_mentioned(self, text):
         t = text.casefold()
@@ -189,6 +195,58 @@ class AttendanceDetector:
             first = [n for n in (*NAME_EXACT, *self._extra_names) if n and len(n.split()) == 1]
             return any(re.search(rf"(?<!\w){re.escape(n.casefold())}(?!\w)", t) for n in first)
         return False
+
+    def _configured_full_names(self):
+        return [n for n in (*NAME_EXACT, *self._extra_names, str(self.student.get("name", "")).lower())
+                if n and len(n.split()) >= 2]
+
+    def _urdu_full_name_spans(self, text, names):
+        """Character spans of full names written in Urdu/Devanagari (same fuzzy rule as _urdu_full_name_heard)."""
+        spans = []
+        pieces = [(m.group(), m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+        folded = [normalize_urdu(p[0]) for p in pieces]
+        for name in names:
+            if not self._has_urdu_script(name):
+                continue
+            target = normalize_urdu(name)
+            parts = target.split()
+            size = len(parts)
+            if size < 2:
+                continue
+            for i in range(len(pieces) - size + 1):
+                window = folded[i:i + size]
+                joined = " ".join(window)
+                close = (SequenceMatcher(None, joined, target).ratio() >= 0.86
+                         and all(SequenceMatcher(None, w, p).ratio() >= 0.65 for w, p in zip(window, parts)))
+                if joined == target or close:
+                    spans.append((pieces[i][1], pieces[i + size - 1][2]))
+        return spans
+
+    def mention_spans(self, text):
+        """[(start, end)] of every place `text` calls ME: my full name or my roll number (and my first
+        name only when student.respond_to_first_name is on). Same rules as is_addressed(), with positions."""
+        text = str(text or "")
+        spans = [(m.start(), m.end()) for pattern in ROLL_ADDRESS_PATTERNS for m in pattern.finditer(text)]
+        spans += [(m.start(), m.end()) for m in FULL_NAME_RE.finditer(text)]
+        full_names = self._configured_full_names()
+        for name in full_names:
+            flexible = r"\s+".join(re.escape(part) for part in name.split())
+            spans += [(m.start(), m.end()) for m in re.finditer(flexible, text, re.IGNORECASE)]
+        spans += self._urdu_full_name_spans(text, full_names)
+        if self.student.get("respond_to_first_name"):
+            for name in (*NAME_EXACT, *self._extra_names):
+                if name and len(name.split()) == 1:
+                    spans += [(m.start(), m.end())
+                              for m in re.finditer(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE)]
+        return addressing.merge_spans(text, spans)
+
+    def mention_verdict(self, text):
+        """addressing.Verdict: is ME being spoken to, spoken about, or is it unclear?"""
+        spans = self.mention_spans(text)
+        if not spans:
+            return addressing.Verdict(addressing.ADDRESS if self.is_addressed(text) else addressing.NONE,
+                                      "no position information")
+        return addressing.classify(str(text or ""), spans)
 
     @staticmethod
     def is_roll_mentioned(text):

@@ -38,6 +38,7 @@ class Segment:
     ts: datetime
     slide: int = 0
     alerted: bool = False
+    source: str = "caption"      # caption | audio
 
 
 def merge_text(old: str, new: str) -> Optional[str]:
@@ -72,6 +73,126 @@ def _caption_points(text: str) -> Tuple[str, List[str]]:
         ):
             sentences.append(sentence)
     return (sentences[0], sentences[1:5]) if sentences else ("", [])
+
+
+UNATTRIBUTED = "Local audio (Whisper)"
+_MEETING_WORDS = re.compile(
+    r"\b(meeting|call|sync|stand-?up|discussion|hang-?out|friends|group|interview|catch-?up|boiz|boys|"
+    r"huddle|retro|brainstorm|chat)\b", re.IGNORECASE)
+
+
+def known_speaker(label: str) -> bool:
+    return bool(label) and label != UNATTRIBUTED and not label.lower().startswith("unattributed")
+
+
+def speaker_stats(segments) -> List[Dict]:
+    """[{speaker, turns, words}] for people who were actually identified, busiest first."""
+    rows: Dict[str, Dict] = {}
+    for seg in segments:
+        if not known_speaker(seg.speaker):
+            continue
+        row = rows.setdefault(seg.speaker, {"speaker": seg.speaker, "turns": 0, "words": 0})
+        row["turns"] += 1
+        row["words"] += len(seg.text.split())
+    return sorted(rows.values(), key=lambda r: -r["words"])
+
+
+def resolve_notes_scope(configured: str, mode: str) -> str:
+    """'discussed' = only what was said (nothing of the bot's own); 'study' = adds explanations, quiz, exam tips.
+    auto: meetings are 'discussed', lectures are 'study'."""
+    if configured in ("discussed", "study"):
+        return configured
+    return "discussed" if mode == "meeting" else "study"
+
+
+def detect_session_mode(subject: str, segments, configured: str = "auto") -> str:
+    """'class' (one teacher talking, students listening) or 'meeting' (peers talking to each other)."""
+    if configured in ("class", "meeting"):
+        return configured
+    if _MEETING_WORDS.search(subject or ""):
+        return "meeting"
+    stats = speaker_stats(segments)
+    total = sum(r["words"] for r in stats)
+    if total < 120 or len(stats) < 2:
+        return "class"
+    shares = [r["words"] / total for r in stats]
+    return "meeting" if sum(1 for x in shares if x >= 0.15) >= 2 and max(shares) <= 0.65 else "class"
+
+
+def merge_questions(questions: List[Dict]) -> List[Dict]:
+    """Merge duplicate / growing questions (translation often reveals they are the same)."""
+    qkey = NotesRecorder._qkey
+    merged: List[Dict] = []
+    for q in questions:
+        key = qkey(q.get("text", ""))
+        for old in merged:
+            other = qkey(old.get("text", ""))
+            if key and other and (key == other or key.startswith(other) or other.startswith(key)):
+                old["to_me"] = bool(old.get("to_me") or q.get("to_me"))
+                if q.get("bot_answer") and not old.get("bot_answer"):
+                    old["bot_answer"] = q["bot_answer"]
+                break
+        else:
+            merged.append(q)
+    return merged
+
+
+async def prepare_class_questions(config: Dict, questions: List[Dict], plain: str, use_ai: bool,
+                                  generate_answers: bool = True) -> List[Dict]:
+    """Translate questions to English, merge duplicates and attach answers (shared by the end-of-class
+    job and 'Regenerate notes')."""
+    class_questions = [dict(q) for q in questions]
+    if class_questions and use_ai:
+        originals = [q["text"] for q in class_questions]
+        replies = [q.get("bot_answer", "") for q in class_questions]
+        english = await ai_notes.to_english(config, originals + replies, plain)
+        count = len(originals)
+        for q, question_en, reply_en in zip(class_questions, english[:count], english[count:]):
+            if question_en != q["text"]:
+                q["text_original"], q["text"] = q["text"], question_en
+            if q.get("bot_answer") and reply_en != q["bot_answer"]:
+                q["bot_answer_original"], q["bot_answer"] = q["bot_answer"], reply_en
+        class_questions = merge_questions(class_questions)
+    if class_questions and use_ai and generate_answers:
+        answers = await ai_notes.answer_class_questions(config, plain, [q["text"] for q in class_questions])
+        for q, a in zip(class_questions, answers):
+            q["answer"] = a
+    for q in class_questions:                            # what the bot really said wins
+        if q.get("bot_answer"):
+            q["answer"] = q["bot_answer"]
+    return class_questions
+
+
+def build_slide_rows(slides: List[Dict], per: Dict[int, str], ai_slides: Dict[int, Dict],
+                     flags: List[Dict], end_ts: float) -> List[Dict]:
+    """Rows for the PDF's slide pages: screenshot + what was said while it was on screen."""
+    rows = []
+    for i, sl in enumerate(slides):
+        t_next = slides[i + 1]["t"] if i + 1 < len(slides) else end_ts
+        ai = ai_slides.get(sl["n"], {})
+        raw = " ".join(per.get(sl["n"], "").split())[:900]
+        caption_takeaway, caption_bullets = _caption_points(raw)
+        ai_takeaway = str(ai.get("takeaway") or "").strip()
+        ai_bullets = ai.get("bullets") or []
+        rows.append({
+            "n": sl["n"], "file": sl["file"], "time": sl["time"], "kind": sl.get("kind", "slide"),
+            "dur_s": max(1.0, t_next - sl["t"]),
+            "takeaway": ai_takeaway or caption_takeaway,
+            "bullets": ai_bullets or caption_bullets,
+            "summary_source": "AI summary" if ai_takeaway or ai_bullets else "Caption notes",
+            "raw": raw,
+            "flags": [f for f in flags if f["slide"] == sl["n"]],
+        })
+    return rows
+
+
+def save_sidecars(directory: Path, slides: List[Dict], questions: List[Dict]) -> None:
+    """slides.json (with class_questions.json, already written elsewhere) lets 'Regenerate notes'
+    rebuild the slide pages and the Q&A page later."""
+    try:
+        (directory / "slides.json").write_text(json.dumps(slides, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:
+        logger.debug(f"Could not save slide data: {e!r}")
 
 
 class NotesRecorder:
@@ -110,8 +231,19 @@ class NotesRecorder:
                 merged = merge_text(seg.text, text)
                 if merged is not None:
                     if merged != seg.text:
-                        seg.text = merged
-                        touched.append(seg)
+                        latest = bool(self.segments) and self.segments[-1] is seg
+                        if latest or not merged.startswith(seg.text):
+                            seg.text = merged
+                            touched.append(seg)
+                        else:
+                            # Somebody else spoke after this person started: the continuation belongs
+                            # AFTER their line in the transcript, not glued onto the old one.
+                            tail = merged[len(seg.text):].strip()
+                            if tail:
+                                seg = Segment(speaker, tail, now, self.current_slide)
+                                self.segments.append(seg)
+                                self._open[speaker] = seg
+                                touched.append(seg)
                     continue
             seg = Segment(speaker, text, now, self.current_slide)
             self.segments.append(seg)
@@ -121,7 +253,7 @@ class NotesRecorder:
             self._maybe_flush()
         return touched
 
-    def add_audio_transcript(self, text: str) -> bool:
+    def add_audio_transcript(self, text: str, speaker: str = "") -> bool:
         """Store local audio ASR unless the same recent speech is already captioned."""
         normalized = lambda value: re.sub(r"\W+", " ", value.casefold()).strip()
         whisper_text = normalized(text)
@@ -141,14 +273,17 @@ class NotesRecorder:
                 return False
         elif len(whisper_text) >= 25 and whisper_text in " ".join(caption_words):
             return False
-        self.feed([("Local audio (Whisper)", text)])
+        seg = Segment(speaker or UNATTRIBUTED, " ".join(text.split()), now, self.current_slide, source="audio")
+        self.segments.append(seg)          # complete utterance: never merged into a caption segment
+        if self.enabled:
+            self._maybe_flush()
         return True
 
     @staticmethod
     def _qkey(text: str) -> str:
         return " ".join(re.sub(r"\W+", " ", str(text or "").casefold()).split())
 
-    def add_question(self, text: str, to_me: bool = False, answer: str = "", answered_by: str = "") -> None:
+    def add_question(self, text: str, to_me: bool = False, answer: str = "") -> None:
         """Remember a question asked in class. `to_me` = the teacher called me, `answer` = what
         the bot replied in chat. Growing captions ("What is an" -> "What is an algorithm?") and
         repeats are merged into one entry."""
@@ -167,13 +302,10 @@ class NotesRecorder:
                 item["to_me"] = item["to_me"] or to_me
                 if answer:
                     item["bot_answer"] = answer
-                if answered_by:
-                    item["answered_by"] = answered_by
                 break
         else:
             self.questions.append({"time": datetime.now(PKT).strftime("%H:%M:%S"), "text": text,
-                                   "to_me": bool(to_me), "bot_answer": answer,
-                                   "answered_by": answered_by})
+                                   "to_me": bool(to_me), "bot_answer": answer})
         try:
             (self.dir / "class_questions.json").write_text(
                 json.dumps(self.questions, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -181,23 +313,7 @@ class NotesRecorder:
             pass
 
     def _merge_questions(self, questions: List[Dict]) -> List[Dict]:
-        """Same question heard several times (captions, microphone, meeting audio) -> one entry."""
-        merged: List[Dict] = []
-        for q in questions:
-            key = self._qkey(q.get("text", ""))
-            for old in merged:
-                other = self._qkey(old.get("text", ""))
-                same = bool(key and other and (key == other or key.startswith(other)
-                                               or other.startswith(key)
-                                               or SequenceMatcher(None, key, other).ratio() >= 0.82))
-                if same:
-                    old["to_me"] = bool(old.get("to_me") or q.get("to_me"))
-                    if q.get("bot_answer") and not old.get("bot_answer"):
-                        old["bot_answer"] = q["bot_answer"]
-                    break
-            else:
-                merged.append(q)
-        return merged
+        return merge_questions(questions)
 
     def add_slide(self, rel_file: str, kind: str = "slide") -> int:
         n = len(self.slides) + 1
@@ -221,6 +337,7 @@ class NotesRecorder:
             (self.dir / "transcript.md").write_text(self._render_md(None), encoding="utf-8")
         except Exception as e:
             logger.warning(f"Could not write transcript: {e}")
+        save_sidecars(self.dir, self.slides, self.questions)
 
     def _transcript_md(self, segments: Optional[List[Segment]] = None) -> str:
         out, last = [], None
@@ -238,8 +355,18 @@ class NotesRecorder:
             for s in (segments if segments is not None else self.segments)
         )
 
+    def _plain_meeting(self, segments: Optional[List[Segment]] = None) -> str:
+        """'[HH:MM:SS] Speaker: text' - the form the meeting-notes prompt and its timestamp checks use."""
+        return "\n".join(
+            f"[{s.ts:%H:%M:%S}] {s.speaker if known_speaker(s.speaker) else 'Unattributed'}: {s.text}"
+            for s in (segments if segments is not None else self.segments)
+        )
+
+    mode = "class"
+
     def _render_md(self, summary: Optional[Dict], flags: Optional[List[Dict]] = None,
                    segments: Optional[List[Segment]] = None) -> str:
+        meeting = getattr(self, "mode", "class") == "meeting"
         parts = [f"# {self.lecture_title} — {self.started:%d %B %Y}",
                  f"*Attendance Bot · started {self.started:%H:%M} · captions are auto-generated and may contain errors*\n"]
         if segments is not None:
@@ -262,8 +389,15 @@ class NotesRecorder:
                 for key, head in (("equations", "Equations & formulas"), ("examples", "Examples")):
                     if section.get(key):
                         parts.append(f"### {head}\n" + "\n".join(f"- {item}" for item in section[key]) + "\n")
-            for key, head in (("emphasis", "Exam radar (stressed by the teacher)"),
-                              ("homework", "Homework / tasks")):
+            if meeting and summary.get("open_questions"):
+                parts.append("## Open questions\n" + "\n".join(f"- {x}" for x in summary["open_questions"]) + "\n")
+            if meeting and summary.get("by_speaker"):
+                parts.append("## Who said what\n" + "\n".join(
+                    f"**{row['speaker']}**\n" + "\n".join(f"- {pt}" for pt in row["points"])
+                    for row in summary["by_speaker"]) + "\n")
+            for key, head in ((("emphasis", "Decisions & outcomes"), ("homework", "Action items"))
+                              if meeting else
+                              (("emphasis", "Exam radar (stressed by the teacher)"), ("homework", "Homework / tasks"))):
                 if summary.get(key):
                     parts.append(f"## {head}\n" + "\n".join(f"- {x}" for x in summary[key]) + "\n")
             key_terms = [
@@ -285,7 +419,7 @@ class NotesRecorder:
                 parts.append("## Self-test\n" + "\n".join(
                     f"{i}. {q['q']}\n   - *{q.get('a', '')}*" for i, q in enumerate(quiz, 1)) + "\n")
         if self.questions:
-            parts.append("## Questions asked in class\n" + "\n".join(
+            parts.append(("## Questions asked in the meeting\n" if meeting else "## Questions asked in class\n") + "\n".join(
                 f"- `{q['time']}` {q['text']}" + (" **(asked to you)**" if q.get("to_me") else "")
                 + (f"\n  - Bot's chat reply: {q['bot_answer']}" if q.get("bot_answer") else "")
                 for q in self.questions) + "\n")
@@ -376,11 +510,21 @@ class NotesRecorder:
                 except Exception as e:
                     logger.error(f"[{self.subject}] Could not write corrected transcript: {e}")
 
-        plain = self._plain(transcript_segments)
+        mode = detect_session_mode(self.subject, transcript_segments, self.features.get("session_mode", "auto"))
+        self.mode = mode
+        participants = speaker_stats(transcript_segments)
+        scope = resolve_notes_scope(self.features.get("notes_scope", "auto"), mode)
+        self.scope = scope
+        discussed = scope == "discussed"
+        plain = self._plain_meeting(transcript_segments) if discussed else self._plain(transcript_segments)
         summary = None
         if use_ai and len(plain.strip()) >= 15:
-            logger.info(f"[{self.subject}] Generating structured AI study notes...")
-            summary = await ai_notes.summarize(self.config, plain)
+            if discussed:
+                logger.info(f"[{self.subject}] Writing notes of what was discussed (nothing added, timestamp-checked)...")
+                summary = await ai_notes.summarize_meeting(self.config, plain, participants)
+            else:
+                logger.info(f"[{self.subject}] Generating structured AI study notes...")
+                summary = await ai_notes.summarize(self.config, plain)
             if summary is None:
                 logger.error(
                     f"[{self.subject}] AI note generation failed; the PDF will contain the "
@@ -400,69 +544,16 @@ class NotesRecorder:
         ai_slides: Dict[int, Dict] = {}
         if self.slides and use_ai:
             logger.info(f"[{self.subject}] Writing notes for {len(self.slides)} slides...")
-            ai_slides = await ai_notes.slide_notes(self.config, per)
+            ai_slides = await ai_notes.slide_notes(self.config, per, "discussed" if discussed else mode)
 
-        class_questions = [dict(q) for q in self.questions]
-        if class_questions and use_ai:
-            # Notes are always English: translate questions heard in Urdu/Hindi/Roman Urdu (and the
-            # bot's chat replies), then merge the duplicates that translation reveals.
-            originals = [q["text"] for q in class_questions]
-            replies = [q.get("bot_answer", "") for q in class_questions]
-            english = await ai_notes.to_english(self.config, originals + replies, plain)
-            count = len(originals)
-            for q, question_en, reply_en in zip(class_questions, english[:count], english[count:]):
-                if question_en != q["text"]:
-                    q["text_original"], q["text"] = q["text"], question_en
-                if q.get("bot_answer") and reply_en != q["bot_answer"]:
-                    q["bot_answer_original"], q["bot_answer"] = q["bot_answer"], reply_en
-            class_questions = self._merge_questions(class_questions)
+        class_questions = await prepare_class_questions(self.config, self.questions, plain, use_ai,
+                                                        generate_answers=not discussed)
+        if use_ai:
             self.questions = class_questions
-        if class_questions and use_ai:
-            # One AI pass: drop statements/noise, rewrite each real question as clear plain English
-            # (no names / roll numbers / filler), remove duplicates, and answer it from the lecture.
-            reviewed = await ai_notes.review_class_questions(
-                self.config, plain, [q["text"] for q in class_questions])
-            kept = []
-            for q, r in zip(class_questions, reviewed):
-                if r is None:                            # AI unavailable: keep only real-looking ones
-                    if q.get("to_me") or q["text"].rstrip().endswith(("?", "؟")):
-                        kept.append(q)
-                    continue
-                if not r["keep"] and not q.get("to_me"):
-                    continue
-                if r["q"]:
-                    q["text"] = r["q"]
-                q["answer"] = r["a"]
-                kept.append(q)
-            class_questions = self._merge_questions(kept)
-            self.questions = class_questions
-        for q in class_questions:                        # what the bot really said wins
-            if q.get("bot_answer"):
-                q["answer"] = q["bot_answer"]
 
         flags = lecture_insights.find_flags(transcript_segments)
-        if flags and use_ai:                             # key moments are quoted in plain English too
-            english = await ai_notes.to_english(self.config, [f["text"] for f in flags], plain)
-            for f, text in zip(flags, english):
-                f["text"] = text
-        flags = [f for f in flags if not ai_notes.has_foreign_script(f["text"])]
-        rows = []
-        for i, sl in enumerate(self.slides):
-            t_next = self.slides[i + 1]["t"] if i + 1 < len(self.slides) else ended.timestamp()
-            ai = ai_slides.get(sl["n"], {})
-            raw = " ".join(per.get(sl["n"], "").split())[:900]
-            caption_takeaway, caption_bullets = _caption_points(raw)
-            ai_takeaway = str(ai.get("takeaway") or "").strip()
-            ai_bullets = ai.get("bullets") or []
-            rows.append({
-                "n": sl["n"], "file": sl["file"], "time": sl["time"], "kind": sl.get("kind", "slide"),
-                "dur_s": max(1.0, t_next - sl["t"]),
-                "takeaway": ai_takeaway or caption_takeaway,
-                "bullets": ai_bullets or caption_bullets,
-                "summary_source": "AI summary" if ai_takeaway or ai_bullets else "Caption notes",
-                "raw": raw,
-                "flags": [f for f in flags if f["slide"] == sl["n"]],
-            })
+        rows = build_slide_rows(self.slides, per, ai_slides, flags, ended.timestamp())
+        save_sidecars(self.dir, self.slides, self.questions)
         ctx = {
             "subject": self.subject, "title": self.lecture_title,
             "date_str": self.started.strftime("%d %B %Y"),
@@ -474,6 +565,11 @@ class NotesRecorder:
             "slides": rows, "summary": summary, "flags": flags,
             "class_questions": class_questions,
             "ai_requested": use_ai,
+            "mode": mode,
+            "notes_scope": scope,
+            "participants": participants,
+            "speaker_digest": lecture_insights.speaker_digest(transcript_segments) if mode == "meeting" else [],
+            "speaker_labels_missing": mode == "meeting" and not participants,
             "keywords": keywords,
             "transcript": self._transcript_groups(transcript_segments),
             "transcript_is_ai_corrected": transcript_segments is not self.segments,

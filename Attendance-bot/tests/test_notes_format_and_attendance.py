@@ -67,7 +67,7 @@ class AttendanceFromSpeechTests(unittest.IsolatedAsyncioTestCase):
             self.h._process_sentence("24K3074 what is polymorphism")
         self.assertIsNone(self.h._present_request)
 
-    async def test_request_is_sent_once_and_never_again_after_marked(self):
+    async def test_request_is_sent_once_then_only_when_called_again(self):
         state = Mock()
         state.get.return_value = False
         tg = Mock()
@@ -83,7 +83,7 @@ class AttendanceFromSpeechTests(unittest.IsolatedAsyncioTestCase):
             self.h._last_present_sent = time.time() - 60
             self.h._present_request = {"how": "Called", "at": time.time() - 1, "delay": 0.0, "explicit": True}
             await self.h._handle_present_request(tg, {}, state)
-            self.assertEqual(send.await_count, 1)               # already marked: never answers a roll call again
+            self.assertEqual(send.await_count, 2)               # called by name again: answers again
 
 
 class StudyGuideFormatTests(unittest.TestCase):
@@ -145,8 +145,7 @@ class StudyGuideFormatTests(unittest.TestCase):
 
 
 class HedgedLiveCallTests(unittest.TestCase):
-    CFG = {"ai": {"provider": "gemini", "keys": {"gemini": "g", "groq": "q"}},
-           "features": {"live_reply_provider": "auto"}}
+    CFG = {"ai": {"provider": "gemini", "keys": {"gemini": "g", "groq": "q"}}}
 
     def test_fast_primary_never_calls_the_second_provider(self):
         calls = []
